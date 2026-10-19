@@ -15,8 +15,8 @@ using GamePadRemapper.Core;
 [assembly: System.Reflection.AssemblyDescription("IGC controller scripts, visual remapping and macros for Interceptor Gamepad Controller")]
 [assembly: System.Reflection.AssemblyCompany("TitanCSA")]
 [assembly: System.Reflection.AssemblyProduct("GamePad Remapper")]
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
 
 namespace GamePadRemapper
 {

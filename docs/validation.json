@@ -1,25 +1,25 @@
 ﻿{
-    "Version":  "1.1.1",
-    "VerifiedUtc":  "2026-10-19T20:36:54.6149773Z",
+    "Version":  "1.1.2",
+    "VerifiedUtc":  "2026-10-19T20:47:33.9188602Z",
     "NativePureChecks":  197833,
     "Core":  {
                  "passed":  true,
                  "tests":  38,
-                 "checks":  82775,
+                 "checks":  83779,
                  "benchmark":  {
                                    "scope":  "pure VM; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
                                    "frames":  101000,
-                                   "median_us":  1.155900,
-                                   "p95_us":  1.371100,
-                                   "maximum_batch_average_us":  1.767000,
+                                   "median_us":  1.156200,
+                                   "p95_us":  1.387100,
+                                   "maximum_batch_average_us":  3.794400,
                                    "garbage_collections":  0
                                },
                  "advanced_benchmark":  {
                                             "scope":  "pure VM additive figure-eight; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
                                             "frames":  101000,
-                                            "median_us":  1.542200,
-                                            "p95_us":  2.239300,
-                                            "maximum_batch_average_us":  3.708700,
+                                            "median_us":  1.623200,
+                                            "p95_us":  2.350400,
+                                            "maximum_batch_average_us":  3.595800,
                                             "garbage_collections":  0
                                         }
              },
@@ -89,20 +89,20 @@
                              },
     "Live":  {
                  "Passed":  true,
-                 "PhysicalReports":  242,
-                 "Forwarded":  3393,
-                 "Changed":  3253,
-                 "ScheduledOutputs":  3149,
+                 "PhysicalReports":  238,
+                 "Forwarded":  3367,
+                 "Changed":  3217,
+                 "ScheduledOutputs":  3127,
                  "NormalPhaseFaults":  0,
-                 "MeanWorkerMicroseconds":  205.91942148760316,
-                 "ElapsedSeconds":  31.234734,
-                 "ProcessCpuSeconds":  0.625,
-                 "PrivateBytes":  35475456,
+                 "MeanWorkerMicroseconds":  206.35462184873941,
+                 "ElapsedSeconds":  31.126724499999998,
+                 "ProcessCpuSeconds":  0.484375,
+                 "PrivateBytes":  36970496,
                  "Gen0Collections":  1,
                  "GipAdditiveFigureEight":  true,
                  "HidAdditiveFigureEight":  true,
                  "GipDistinctPatternPoints":  20,
-                 "HidDistinctPatternPoints":  24,
+                 "HidDistinctPatternPoints":  20,
                  "ScheduledDuringQuietInput":  true,
                  "RestoredAndIdleWhenConditionCeases":  true,
                  "InvalidSourcePreservedCapture":  true,
@@ -120,14 +120,14 @@
                            "value":  [
                                          {
                                              "Name":  "GamePadRemapper.exe",
-                                             "HostSHA256":  "48618FE4396645AC12A7C0445C5E4874670844858A626755F500E4CBDB1F80D7",
-                                             "GuestSHA256":  "48618FE4396645AC12A7C0445C5E4874670844858A626755F500E4CBDB1F80D7",
+                                             "HostSHA256":  "04ED58242F1DEA14D00624CCB3F27F5F512BC5627B2E8152551D9A4A08C65719",
+                                             "GuestSHA256":  "04ED58242F1DEA14D00624CCB3F27F5F512BC5627B2E8152551D9A4A08C65719",
                                              "ExactMatch":  true
                                          },
                                          {
                                              "Name":  "GamePadRemapper.Core.dll",
-                                             "HostSHA256":  "60510377A493569D6307104E6AF16E43D1ECABCB9CB37BD5EF8A9EC2804DC99A",
-                                             "GuestSHA256":  "60510377A493569D6307104E6AF16E43D1ECABCB9CB37BD5EF8A9EC2804DC99A",
+                                             "HostSHA256":  "55F2CF5D15D93C540A135FA46B022D10AA4D25B46896BA1C02E437968EC161BA",
+                                             "GuestSHA256":  "55F2CF5D15D93C540A135FA46B022D10AA4D25B46896BA1C02E437968EC161BA",
                                              "ExactMatch":  true
                                          },
                                          {

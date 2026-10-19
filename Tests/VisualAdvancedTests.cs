@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
+using System.IO;
 using GamePadRemapper.Core;
 
 internal static class VisualAdvancedTests
@@ -39,6 +40,17 @@ internal static class VisualAdvancedTests
         string content = "// @document " + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)) + "\n";
         string hash; using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(content))).Replace("-", "");
         return "main{}\n// <igc-visual-v1>\n// @hash " + hash + "\n" + content + "// </igc-visual-v1>\n";
+    }
+    private static string Difference(string expected, string actual)
+    {
+        int offset = 0; while (offset < expected.Length && offset < actual.Length && expected[offset] == actual[offset]) offset++;
+        string directory = AppDomain.CurrentDomain.BaseDirectory;
+        File.WriteAllText(Path.Combine(directory, "visual-idempotence-expected.igc"), expected, new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(directory, "visual-idempotence-actual.igc"), actual, new UTF8Encoding(false));
+        string report = "{\"first_difference\":" + offset + ",\"expected_length\":" + expected.Length + ",\"actual_length\":" + actual.Length + ",\"expected\":" + new JavaScriptSerializer().Serialize(expected) + ",\"actual\":" + new JavaScriptSerializer().Serialize(actual) + "}";
+        File.WriteAllText(Path.Combine(directory, "visual-idempotence-tests.json"), report, new UTF8Encoding(false));
+        int start = Math.Max(0, offset - 30);
+        return ", first difference=" + offset + ", expected=" + new JavaScriptSerializer().Serialize(expected.Substring(start, Math.Min(100, expected.Length - start))) + ", actual=" + new JavaScriptSerializer().Serialize(actual.Substring(start, Math.Min(100, actual.Length - start)));
     }
     public static void Run(Action<bool, string> check)
     {
@@ -234,11 +246,40 @@ internal static class VisualAdvancedTests
             for (int roundtrip = 0; roundtrip < 100; roundtrip++)
             {
                 string rebuilt = VisualDocument.Parse(stableSource).BuildSource();
-                check(rebuilt == stableSource, "visual source remains byte-for-byte stable without accumulating whitespace: " + roundtrip + ", original=" + originalSource.Replace("\r", "\\r").Replace("\n", "\\n") + ", lengths=" + stableSource.Length + "/" + rebuilt.Length);
+                check(rebuilt == stableSource, "visual source remains byte-for-byte stable without accumulating whitespace: " + roundtrip + ", original=" + originalSource.Replace("\r", "\\r").Replace("\n", "\\n") + ", lengths=" + stableSource.Length + "/" + rebuilt.Length + (rebuilt == stableSource ? "" : Difference(stableSource, rebuilt)));
                 stableSource = rebuilt;
             }
             if (originalSource.Contains("Preserve this comment")) check(stableSource.Contains("    // Preserve this comment and closing indent.\r\n    \r\n"), "visual rebuild preserves original custom comment and brace indentation");
         }
+        document = VisualDocument.Parse("main{}"); document.Rules.Add(new VisualRule { Kind = VisualRuleKind.Deadzone, Source = "LX", Value = 8 });
+        string canonicalSource = document.BuildSource();
+        const string canonicalJson = "{\"Constants\":[],\"Macros\":[],\"Rules\":[{\"Enabled\":true,\"Kind\":2,\"Source\":\"LX\",\"Target\":\"EAST\",\"Value\":8}],\"Version\":2}";
+        string expectedMetadata = "// @document " + Convert.ToBase64String(Encoding.UTF8.GetBytes(canonicalJson));
+        check(canonicalSource.Contains(expectedMetadata), "generated metadata has a canonical ordinal object-key order");
+        foreach (string equivalentJson in new[]
+        {
+            "{\"Version\":2,\"Rules\":[{\"Kind\":2,\"Source\":\"LX\",\"Target\":\"EAST\",\"Value\":8,\"Enabled\":true}],\"Macros\":[],\"Constants\":[]}",
+            "{\"Macros\":[],\"Constants\":[],\"Version\":2,\"Rules\":[{\"Value\":8,\"Target\":\"EAST\",\"Enabled\":true,\"Source\":\"LX\",\"Kind\":2}]}"
+        })
+        {
+            string equivalent = VisualDocument.Parse(RawMetadataSource(equivalentJson)).BuildSource();
+            check(equivalent == canonicalSource, "equivalent metadata with different object-key orders generates identical source and hashes" + (equivalent == canonicalSource ? "" : Difference(canonicalSource, equivalent)));
+        }
+        for (int roundtrip = 0; roundtrip < 1000; roundtrip++)
+        {
+            if (roundtrip % 20 == 0)
+            {
+                GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+                // Different reflection cache access patterns must not change the document bytes.
+                typeof(VisualRule).GetProperty(new[] { "Enabled", "Value", "Target", "Source", "Kind" }[roundtrip / 20 % 5]);
+                typeof(VisualMacro).GetProperty(new[] { "Steps", "Name", "Pattern", "Condition", "Activation" }[roundtrip / 20 % 5]);
+            }
+            string rebuilt = VisualDocument.Parse(canonicalSource).BuildSource();
+            check(rebuilt == canonicalSource, "canonical metadata stays deterministic through cache and GC pressure: " + roundtrip + (rebuilt == canonicalSource ? "" : Difference(canonicalSource, rebuilt)));
+        }
+        document = VisualDocument.Parse("main{}"); document.Rules.Add(new VisualRule { Kind = VisualRuleKind.Invert, Source = "LY" }); document.Rules.Add(new VisualRule { Kind = VisualRuleKind.Sensitivity, Source = "LX", Value = 25 });
+        parsed = VisualDocument.Parse(document.BuildSource());
+        check(parsed.Rules[0].Kind == VisualRuleKind.Invert && parsed.Rules[1].Kind == VisualRuleKind.Sensitivity, "canonical metadata preserves action-array order");
         document = VisualDocument.Parse("int __igc_visual_state_0_last; int __igc_macro_0; main{} function __igc_visual_apply(){}"); document.Macros.Add(VisualDocument.CreateFigureEightPreset());
         parsed = VisualDocument.Parse(document.BuildSource()); check(parsed.Macros.Count == 1, "generated state/helper identifiers avoid collisions with advanced code");
 

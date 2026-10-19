@@ -174,6 +174,37 @@ namespace GamePadRemapper.Core
             return doc;
         }
         private static JavaScriptSerializer Serializer() { return new JavaScriptSerializer { MaxJsonLength = 262144, RecursionLimit = 64 }; }
+        private static string MetadataJson(Payload payload)
+        {
+            var serializer = Serializer();
+            object value = serializer.DeserializeObject(serializer.Serialize(payload));
+            var result = new StringBuilder(); WriteMetadataJson(value, result, serializer); return result.ToString();
+        }
+        private static void WriteMetadataJson(object value, StringBuilder result, JavaScriptSerializer serializer)
+        {
+            // Reflection property order is not a serialization contract on .NET Framework.
+            // Canonical object keys keep generated source and its hash stable across caches,
+            // runtimes and imports; list order still defines the order of visual actions.
+            var fields = value as Dictionary<string, object>;
+            if (fields != null)
+            {
+                var names = new List<string>(fields.Keys); names.Sort(StringComparer.Ordinal); result.Append('{');
+                for (int i = 0; i < names.Count; i++)
+                {
+                    if (i != 0) result.Append(','); result.Append(serializer.Serialize(names[i])).Append(':');
+                    WriteMetadataJson(fields[names[i]], result, serializer);
+                }
+                result.Append('}'); return;
+            }
+            var items = value as object[];
+            if (items != null)
+            {
+                result.Append('[');
+                for (int i = 0; i < items.Length; i++) { if (i != 0) result.Append(','); WriteMetadataJson(items[i], result, serializer); }
+                result.Append(']'); return;
+            }
+            result.Append(serializer.Serialize(value));
+        }
         private static Payload ReadPayload(string encoded)
         {
             if (encoded.Length > 349528) throw new ScriptException("Visual metadata is too large.");
@@ -587,7 +618,7 @@ namespace GamePadRemapper.Core
             var payload = new Payload { Version = 2, Rules = Rules, Macros = Macros, Constants = new List<VisualConstant>() };
             foreach (VisualConstant item in Constants) if (item.OriginalStart < 0) payload.Constants.Add(item);
             string metadata;
-            try { metadata = Convert.ToBase64String(Encoding.UTF8.GetBytes(Serializer().Serialize(payload))); }
+            try { metadata = Convert.ToBase64String(Encoding.UTF8.GetBytes(MetadataJson(payload))); }
             catch (InvalidOperationException) { throw new ScriptException("Visual metadata exceeds its size or nesting limit."); }
             string content = "// @document " + metadata + Environment.NewLine + definitions + "function " + helper + "() {" + Environment.NewLine + body + "}" + Environment.NewLine + comboSource;
             string result = advanced.TrimEnd() + Environment.NewLine + Environment.NewLine + Begin + Environment.NewLine + "// @hash " + Hash(content) + Environment.NewLine + content + End + Environment.NewLine;
