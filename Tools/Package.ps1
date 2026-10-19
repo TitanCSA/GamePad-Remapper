@@ -27,8 +27,15 @@ $zipPath=Join-Path $dist ('GamePad-Remapper-'+$version+'-win-x64.zip')
 # Only the single known generated archive is replaced; source and user scripts
 # are never removed or traversed for cleanup.
 if(Test-Path -LiteralPath $zipPath){Remove-Item -LiteralPath $zipPath -Force}
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($folder,$zipPath,[IO.Compression.CompressionLevel]::Optimal,$false)
+$archive=[IO.Compression.ZipFile]::Open($zipPath,[IO.Compression.ZipArchiveMode]::Create)
+try{
+    foreach($file in (Get-ChildItem -LiteralPath $folder -Recurse -File)){
+        $entryName=$file.FullName.Substring($folder.Length+1).Replace('\','/')
+        $null=[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,$entryName,[IO.Compression.CompressionLevel]::Optimal)
+    }
+}finally{$archive.Dispose()}
 $assets=@($zipPath,(Join-Path $dist 'InterceptorSetup.exe'))
 $lines=@(foreach($path in $assets){(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($path)})
 [IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'),$lines,(New-Object Text.UTF8Encoding($false)))
