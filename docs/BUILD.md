@@ -1,35 +1,48 @@
-# Build and test
+﻿# Build and test
 
-Windows x64, Visual Studio 2022 / Build Tools with **Desktop development with
-C++**, a Windows SDK, **.NET Framework 4.8 targeting pack**, and CMake 3.20+.
-There are no NuGet or JavaScript dependencies. The driver and WDK are not
-needed to build, edit, compile scripts, render the UI or run pure tests.
+Windows 10/11 x64, Visual Studio 2022 or Build Tools with **Desktop development
+with C++**, a Windows SDK, and CMake 3.20+. No C# compiler, .NET targeting pack, NuGet,
+JavaScript runtime, WDK or installed driver is needed to build the application.
+The JSON dependency is pinned and included in the source tree. The optional
+AddressSanitizer configuration needs the C++ AddressSanitizer component and
+MSVC 14.38 or newer; the build selects an installed compiler/runtime pair and
+records it for repeat tests.
 
 ```powershell
-.\Build.ps1                 # native adapter, language engine, app and pure tests
-.\Build.ps1 -Target Test    # repeat tests against existing binaries
-.\Build.ps1 -Target Managed # rebuild C# only
-.\Build.ps1 -Render         # also render code/visual screenshots without capture
-.\Build.ps1 -Target Package # test, download pinned installer and make portable ZIP
+.\Build.ps1                     # compile C++ and run offline tests
+.\Build.ps1 -Target Build       # compile only
+.\Build.ps1 -Target Test        # test existing binaries
+.\Build.ps1 -Render             # also render the native interface without capture
+.\Build.ps1 -AddressSanitizer   # separate instrumented build and tests
+.\Build.ps1 -Target Package     # test and create the portable release archive
 ```
 
-The application is `bin/GamePadRemapper.exe`; keep its two DLLs alongside it.
-`dist/` contains the portable ZIP, the original Interceptor UI installer and
-SHA-256 checksums. Packaging verifies the exact installer SHA-256 against the
-referenced driver release. It never rebuilds or resigns a driver.
+The executable is **`App/.build/Release/bin/GamePadRemapper.exe`**. All application
+components and the Interceptor user-mode SDK are linked into this one EXE.
+The C++ runtime is statically linked. No application DLLs or CLR are required.
+Windows system libraries remain ordinary operating-system dependencies.
 
-`Core/` implements the independent IGC compiler, runtime and visual document
-model. `App/` is WPF, with a native callback adapter in `DriverBridge.cs`.
-`Native/` handles capture ownership, descriptor-based controller conversion,
-timers and forwarding through the unmodified two-file `Interceptor/` SDK.
-`Scripts/` contains editable examples. `Tests/` contains software tests.
+The repository has four content folders:
 
-The build compiles optimized x64 binaries with warnings as errors. C++ uses
-the static CRT; the app needs the .NET Framework 4.8 runtime supplied with
-current Windows 10/11 installations. Application and installer EXEs are not
-covered by the embedded driver's Microsoft signature.
+| Folder | Content |
+| --- | --- |
+| `App` | C++ application, language engine, capture adapter, native UI, tests and packaging tools |
+| `Scripts` | Editable `.igc` examples |
+| `docs` | Build, language and validation documentation, with interface images |
+| `Interceptor` | Original two-file C++ user-mode SDK |
 
-Pure tests and UI render tests never create a capture or install a driver.
-Live tests are separate, explicitly guarded laboratory entry points. Do not
-run capture tests on a production desktop. See [validation](VALIDATION.md) for
-what was measured and the limits of those results.
+Build products, private validation evidence and release archives are ignored
+under `App/.build/`. CMake and the build entry point remain at the root beside
+the README and license notices. There is no separate Core, Native, Tests or
+Tools folder at the root.
+
+Builds use optimized x64 C++17, `/W4 /WX`, a static CRT, ASLR, DEP and Control Flow
+Guard. AddressSanitizer is a separate validation configuration, not a release
+dependency. Offline tests do not create capture or install a driver. Explicit
+live tests additionally require a dedicated Hyper-V guest and laboratory opt-in.
+
+Packaging places only the application, examples, documentation and original
+signed-driver installer in `App/.build/dist/`, with SHA-256 checksums. The exact
+driver installer hash is verified; packaging never rebuilds or signs a driver.
+Microsoft signatures cover the embedded kernel driver package, not this app
+or the installer EXE.

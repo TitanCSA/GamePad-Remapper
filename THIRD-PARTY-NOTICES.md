@@ -1,5 +1,13 @@
 # Third-party notices
 
+`App/ThirdParty/json.hpp` is the unmodified single-header JSON for Modern C++
+library, version 3.12.0, copyright Niels Lohmann and contributors, MIT licensed.
+Its license is included in `App/ThirdParty/json.LICENSE.MIT` in source and
+`JSON-LICENSE.txt` in the portable release. The pinned header
+SHA-256 is `aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63`,
+published in the [official release](https://github.com/nlohmann/json/releases/tag/v3.12.0).
+It is used for local visual metadata and test reports, not on the input path.
+
 `Interceptor/Interceptor.h` and `Interceptor.cpp` are the public user-mode C++17
 SDK from [TitanCSA/Interceptor-Gamepad-Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller),
 version 1.0.0.0, copyright 2026 TitanCSA, MIT licensed. Kernel driver source,

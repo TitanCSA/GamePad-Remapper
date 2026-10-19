@@ -1,76 +1,67 @@
-# Validation - 1.1.2
+# Validation â€” 2.0.0 native C++
 
-Optimized Windows x64 MSVC/C# builds use warnings as errors. The compact
-[machine-readable results](validation.json) include exact tested binary hashes.
-[Build and repeat the software checks](BUILD.md).
+The application, editor, visual document model, compiler, VM and capture adapter
+are C++17. The release is a single native **AMD64 EXE with no CLR header**, built
+with warnings as errors, a static C++ runtime, ASLR, DEP and Control Flow Guard.
+[Build the checks](BUILD.md); [machine-readable results](validation.json).
 
 | Area | Result |
 | --- | --- |
-| Native conversion | **197,833 checks**: signed axes, unchanged bytes, unrelated fields, triggers, GIP tails, HID identities, repeated usages, relative values and bounds. |
-| Native memory checks | The same pure conversion tests passed under MSVC AddressSanitizer. Decoded scalar relative movements are neutralized in synthetic templates, so an unrelated timed action does not replay a prior movement. Wide opaque binary fields remain outside this scalar handling. |
-| Startup failures | A private fault-injected build of the actual native worker passed 100 startup failures in the VM: error 21, ABI 2, final cause published, no input callback/capture. This harness differs from the release binary only by replacing initialization with the injected failure. |
-| Compiler/runtime | **38 groups / 83779 assertions**: arithmetic, isolation, timing, clipping, combo cancellation/restart, rejected timestamps, missing control endpoints, strict syntax, typed visual metadata and long-running clocks. |
-| Stress | Two measured 101,000-frame loops after warmup, 32,000 parallel-instance frames, 3,000 malformed scripts, and 3,000 randomized ordered-clipping comparisons. Zero GC in both measured loops. |
-| UI/storage | **48 checks**: background validation, stale-result rejection, invalid-field gating and discard, noncapturing live apply, stable controller cards, view transitions, recovery retirement, atomic saves and strict text handling. Four actual WPF renders inspected. |
-| Signed integration | Exact unchanged Microsoft-signed driver in a dedicated Windows 11 VM, with real managed/native/driver capture and forwarding against HID/GIP fixtures. |
-| Complex motion | A+B+RX>50 drives additive GIP figure-eight motion around physical LX=10 / LY=-20. Generic HID uses BUTTON_1+BUTTON_2 and AXIS_1/AXIS_2. Both produced multiple distinct points without center drift. |
-| Quiet input | Fixture phases include 1,400 ms without physical submissions. Active patterns continue; button release or a false axis threshold restores physical output and stops timed changes. |
-| Recovery | Invalid source keeps the active config. Live replacement works. Runtime division by zero reports its cause and releases capture. Live apply cannot restart a faulted/stopped capture. Explicit reinjection and Stop pass. |
+| Capture conversion | **197,833 checks**: exact unchanged reports, signed axes, triggers, GIP tails, HID identities, relative scalars and bounds. |
+| Compiler/runtime | **25 groups / 79278 assertions** plus **202,000 measured frames** with **zero VM allocations** after warmup. Full operators, arrays, functions, all 48 builtins, combo restart/stop, clipping, timing, availability and limits. |
+| Reference parity | **107 frozen programs**, each with 16 deterministic input frames, compared against version 1.1.2 for compile/fault results, all 256 output controls and next timer deadlines. Includes original regression programs and randomized integer expressions. No C# compiler/runtime is used by the tests. |
+| Visual documents | **3,667 assertions**: exact legacy v1/v2 imports, UTF-8 and JSON escaping, source hashes, generated-source stability, nested triggers, every activation/pattern mode, schema limits and motion stress. |
+| Service boundary | **24 contracts** with a fake backend that cannot access a driver: independent sources, same-program reinjection, live replacement, missing/invalid programs, original-input restoration on fault, detached snapshots, startup errors and ownership. |
+| UI/storage | **42 offline checks** with no service construction or driver access. Code/Visual roundtrip, transactional edits, NOT conversions preserving full conditions, validation ordering, invalid-field discard, recovery, UTF-8/UTF-16, atomic saves and background draft retirement. Four real native interface renders were inspected. |
+| Memory instrumentation | Full application and all four CTest targets pass with matched MSVC 14.44 AddressSanitizer, plus the offline native UI test. Instrumented binaries and their runtime are not shipped. |
+| Signed integration | The exact release EXE passed UI and real capture/forwarding tests against virtual HID and GIP fixtures in a dedicated Windows 11 Hyper-V VM. The original Microsoft-signed driver was unchanged. |
 
-The normal integration phase processed **238 physical reports**, forwarded
-**3367 reports** including **3127 scheduled outputs**, and recorded **3217 changed
-outputs**, with **zero capture faults**. A later deliberate runtime fault was
-handled as expected. The runner took 31.127 s, used 0.484 process CPU seconds,
-approximately 35.258 MiB private process memory and 1 generation-0 collections.
-This describes the test runner at its fixture cadence, not the full WPF UI or
-a guaranteed maximum resource cost.
+The integration test exercised remapping, timed button sequences and continuous
+additive figure-eight motion around physical LX=10 / LY=-20. It recorded
+**19 distinct GIP points and 22 HID points**, kept motion running during
+1,400 ms gaps without physical reports, and restored physical output when the
+button/axis conditions ceased. Invalid source preserved capture; a deliberate
+division-by-zero fault reported its cause and released capture. Live apply
+could not restart a stopped/faulted session; explicit reinjection and Stop passed.
 
-New regressions include thousands of self-restarts without stack growth,
-cancellation cleanup, preservation of input history after rejected timestamps,
-malformed visual metadata and invalid unsaved edits. Passing these bounded tests
-does not prove the absence of every possible bug.
+The initial remapping phase received **26 physical reports**, forwarded
+**30 reports**, changed **30 outputs**, and emitted **4
+scheduled outputs**, with zero unintended capture faults. The later pattern phase
+used the same real native worker and signed-driver pipeline.
 
-Visual metadata uses ordinal object-key ordering and preserves action-list order.
-Equivalent JSON property orders and 1,000 roundtrips under GC/reflection pressure
-are tested, with exact-source diagnostics exported on an idempotence failure.
+## Measurements and scope
 
-## Timing scope
+The pure VM stress loop averaged **0.803 us per frame** over 202,000 frames
+after 10,000 warmup frames, with no per-frame allocations. This is software
+throughput, not a per-packet tail latency or a hardware measurement.
 
-The pure VM median / p95 batch averages were **1.156 / 1.387 us per frame**;
-the additive figure-eight benchmark measured **1.623 / 2.35 us**. Each distribution
-contains 101 averages of 1,000 frames, after 10,000 warmup frames. These are
-software throughput measurements, not per-packet tail or hardware latency.
+The headless integration runner took **31.024 s** and used **0.438 process CPU
+seconds**. Its private memory at completion was **2.668 MiB**. The initial
+physical-event worker average was **184.850 us**, including initial source setup,
+transformation, encoding and synchronous send. It excludes receive/decode wait,
+USB polling, games and display. These VM measurements describe this workload;
+they are not full-UI resource measurements or guaranteed maximum costs.
 
-The live worker mean was **206.355 us per physical event**, including initial source
-setup, callback, encoding and synchronous send. It excludes input wait,
-receive/batch decoding, USB polling, games and display. VM scheduling and load
-affect all timing; no zero-latency claim is made.
-
-One native worker uses high-resolution one-shot Windows timers, with a standard
-timer fallback. There is no busy-spin or global timer-resolution change.
-Conditional ticks disappear when their path is inactive. The UI's final quiet
-state gets one deferred publication, then that wake is removed. Runtime warmup
-uses a fixed throwaway program before capture.
+Timed work uses one-shot Windows timers, with no busy-spin or global timer
+resolution change. Conditional ticks disappear when inactive. The UI compiler
+and draft writer run outside the input worker. Ordinary editing and offline
+tests never start capture; Inject remains explicit and administrator-only.
 
 ## Practical limits
 
-Integration exercised virtual **HID and GIP** fixtures. XUSB conversion was
-exhaustively checked in software. Physical XUSB/XInputHID, every model/wireless
-transport, proprietary checksums, vibration, sensors and adaptive triggers were
-not individually tested. Descriptor support is not a universal hardware guarantee.
+Physical XUSB/XInputHID hardware, every controller/transport, proprietary
+checksums, feedback, sensors and adaptive triggers were not individually tested.
+Descriptor and protocol support does not establish universal compatibility.
+Bounded tests and AddressSanitizer cannot prove the absence of every bug.
 
-The first GIP attempt exposed a setup limitation of the existing signed driver:
-the source had not received protocol metadata after installation/restart and
-remained unready. Reconnecting the laboratory USB fixture completed negotiation;
-the final test used that ready source and a Windows XInput consumer. This release
-does not change the kernel driver's protocol negotiation. If a GIP source is
-missing, inspect the driver's diagnostics and reconnect it after installation.
+The existing signed driver can require a reconnect after installation to obtain
+GIP negotiation metadata. The laboratory fixture was reconnected before these
+tests. This application-only release does not alter kernel negotiation, the
+two-hour per-boot demo or the signed package. A fresh two-hour expiry wait was
+not repeated; this is not Secure Boot/HVCI certification.
 
-The dedicated VM's preexisting boot settings, fixture certificates and class
-filters were restored; product services/packages/tasks were removed and Windows
-was shut down normally. Nothing was installed or captured on the host. This is
-not Secure Boot/HVCI certification. The signed driver and its existing two-hour
-per-boot allowance are unchanged; a fresh two-hour expiry wait was not repeated.
-
-UAC, open/save dialogs and clipboard access use Windows facilities. Unattended
-checks do not claim manual coverage of every desktop policy or privilege prompt.
+After normal installation and uninstall/restart cycles, the VM's boot settings,
+certificates and class filters matched the baseline. Product services, packages
+and tasks were removed, the lab folder was deleted, and Windows shut down
+normally. Nothing was installed or captured on the host. Native Windows UAC,
+clipboard and file dialogs remain subject to the user's desktop policies.

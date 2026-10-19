@@ -1,4 +1,4 @@
-# GamePad Remapper — Windows Controller Scripting & Macros
+# GamePad Remapper — Native C++ Controller Scripting & Macros
 
 A desktop editor for controller remapping, compound triggers, continuous motion
 and timed macros in **`.igc` scripts**,
@@ -12,7 +12,7 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 | --- | --- |
 | ![IGC code editor; simulated device preview](docs/images/code-editor.png) | ![Visual remapping and macro editor; simulated device preview](docs/images/visual-editor.png) |
 
-Screenshots show the real WPF interface with explicitly simulated controller
+Screenshots show the real native Windows interface with explicitly simulated controller
 activity. Normal use displays actual driver state and never invents devices.
 
 <details>
@@ -44,10 +44,10 @@ activity. Normal use displays actual driver state and never invents devices.
 
 ## Start
 
-Windows 10/11 **x64**, .NET Framework **4.8**.
+Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-1.1.2-win-x64.zip`. Keep the EXE and
-   both DLLs together. The ZIP includes example scripts and the driver installer.
+1. Download and extract `GamePad-Remapper-2.0.0-win-x64.zip`. The application is a single native C++ EXE.
+   The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
@@ -184,3 +184,19 @@ Built by **TitanCSA**, using the independent
 project and the interception workflow popularized by
 [oblitum/Interception](https://github.com/oblitum/Interception). No affiliation with
 Cronus, oblitum, Microsoft, Sony or other controller manufacturers.
+
+## Source layout
+
+Only four content folders:
+
+```text
+App/          C++ application, UI, script engine, capture, tests and build tools
+Scripts/      Ready-to-edit .igc examples
+docs/         Documentation and screenshots
+Interceptor/  The original two-file C++ user-mode SDK
+```
+
+Everything in the application is **C++17**, including the editor, visual model,
+compiler and runtime. Capture and the SDK are linked directly into the EXE.
+Build with `./Build.ps1`; generated files stay inside ignored `App/.build/`.
+See the [build instructions](docs/BUILD.md).

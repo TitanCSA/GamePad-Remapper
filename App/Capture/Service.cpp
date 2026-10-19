@@ -1,0 +1,238 @@
+#include "Service.h"
+#include "Bridge.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <climits>
+#include <mutex>
+#include <stdexcept>
+#include <system_error>
+#include <unordered_map>
+
+namespace gpr {
+namespace {
+std::string Utf8(const wchar_t *text) {
+    if (!text || !*text)
+        return {};
+    const int length =
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, nullptr, 0, nullptr, nullptr);
+    if (length <= 0)
+        return "Invalid Windows diagnostic text";
+    std::string result(static_cast<std::size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, result.data(), length, nullptr, nullptr);
+    result.pop_back();
+    return result;
+}
+GR_Snapshot NativeSnapshot() {
+    GR_Snapshot result{};
+    result.size = sizeof(result);
+    const auto error = GR_GetSnapshot(&result);
+    if (error)
+        throw std::system_error(static_cast<int>(error), std::system_category(), "Read capture status");
+    if (result.version != 2)
+        throw std::runtime_error("The capture engine version does not match this application.");
+    return result;
+}
+} // namespace
+struct RemapperService::Impl {
+    struct ProgramSlot {
+        std::shared_ptr<const ScriptProgram> Program;
+        explicit ProgramSlot(std::shared_ptr<const ScriptProgram> program) : Program(std::move(program)) {}
+    };
+    struct RuntimeDevice {
+        std::unique_ptr<ScriptInstance> Script;
+        ControlFrame Frame;
+        std::int64_t LastMicroseconds = 0;
+    };
+    std::mutex gate, errorGate, cacheGate;
+    std::unordered_map<std::uint32_t, RuntimeDevice> devices;
+    std::shared_ptr<const ProgramSlot> pending, executing;
+    std::string startupMessage, callbackError;
+    bool started = false;
+    ServiceSnapshot cached;
+
+    Impl() {
+        wchar_t text[1024]{};
+        GR_Probe(text, 1024);
+        startupMessage = Utf8(text);
+        cached.Status = startupMessage;
+    }
+    void SetError(std::string text) {
+        std::lock_guard<std::mutex> lock(errorGate);
+        callbackError = std::move(text);
+    }
+    static int __cdecl Transform(std::uint32_t key, std::uint32_t family, const int *physical,
+                                 const std::uint8_t *available, int *output, std::uint32_t flags,
+                                 void *user) noexcept {
+        auto &self = *static_cast<Impl *>(user);
+        try {
+            if (flags == 3) {
+                self.devices.erase(key);
+                return 0;
+            }
+            const auto current = std::atomic_load_explicit(&self.pending, std::memory_order_acquire);
+            if (current != self.executing) {
+                self.devices.clear();
+                self.executing = current;
+            }
+            if (!current) {
+                std::copy_n(physical, 256, output);
+                return 0;
+            }
+            auto found = self.devices.find(key);
+            if (found == self.devices.end()) {
+                RuntimeDevice device;
+                device.Script = current->Program->CreateInstance();
+                found = self.devices.emplace(key, std::move(device)).first;
+            }
+            auto &device = found->second;
+            auto &frame = device.Frame;
+            frame.DeviceKey = key;
+            frame.Family = family;
+            std::copy_n(physical, 256, frame.Physical.begin());
+            for (std::size_t i = 0; i < 256; ++i)
+                frame.Available[i] = available[i] != 0;
+            const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+                                 std::chrono::steady_clock::now().time_since_epoch())
+                                 .count();
+            const int elapsed = device.LastMicroseconds == 0
+                                    ? 0
+                                    : static_cast<int>(std::clamp<std::int64_t>(
+                                          (now - device.LastMicroseconds) / 1000, 0, INT_MAX));
+            device.Script->Execute(frame, now, elapsed);
+            device.LastMicroseconds = now;
+            std::copy(frame.Values.begin(), frame.Values.end(), output);
+            return device.Script->NextWakeMilliseconds();
+        } catch (const ScriptException &error) {
+            try {
+                self.SetError(error.Diagnostic());
+            } catch (...) {
+            }
+        } catch (const std::exception &error) {
+            try {
+                self.SetError(error.what());
+            } catch (...) {
+            }
+        } catch (...) {
+            try {
+                self.SetError("Unexpected script runtime failure.");
+            } catch (...) {
+            }
+        }
+        std::copy_n(physical, 256, output);
+        return -1;
+    }
+};
+RemapperService::RemapperService() : impl_(std::make_unique<Impl>()) {}
+RemapperService::~RemapperService() {
+    try {
+        Stop();
+    } catch (...) {
+    }
+}
+void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program) {
+    if (!program)
+        throw std::invalid_argument("A compiled script is required.");
+    auto &self = *impl_;
+    std::lock_guard<std::mutex> lock(self.gate);
+    std::atomic_store_explicit(&self.pending, std::make_shared<const Impl::ProgramSlot>(std::move(program)),
+                               std::memory_order_release);
+    self.SetError({});
+    if (self.started && NativeSnapshot().running) {
+        GR_Wake();
+        return;
+    }
+    if (self.started) {
+        GR_Stop();
+        self.started = false;
+    }
+    self.devices.clear();
+    self.executing.reset();
+    wchar_t text[1024]{};
+    auto error = GR_Probe(text, 1024);
+    if (error)
+        throw std::system_error(static_cast<int>(error), std::system_category(), Utf8(text));
+    error = GR_Start(Impl::Transform, &self);
+    if (error) {
+        const auto failed = NativeSnapshot();
+        const auto detail = Utf8(failed.error);
+        throw std::system_error(static_cast<int>(error), std::system_category(),
+                                detail.empty() ? "Capture could not start" : detail);
+    }
+    self.started = true;
+}
+bool RemapperService::TryUpdate(std::shared_ptr<const ScriptProgram> program) {
+    if (!program)
+        throw std::invalid_argument("A compiled script is required.");
+    auto &self = *impl_;
+    std::lock_guard<std::mutex> lock(self.gate);
+    if (!self.started || !NativeSnapshot().running)
+        return false;
+    std::atomic_store_explicit(&self.pending, std::make_shared<const Impl::ProgramSlot>(std::move(program)),
+                               std::memory_order_release);
+    self.SetError({});
+    GR_Wake();
+    return true;
+}
+void RemapperService::Stop() {
+    auto &self = *impl_;
+    std::lock_guard<std::mutex> lock(self.gate);
+    if (self.started) {
+        GR_Stop();
+        self.started = false;
+    }
+    self.devices.clear();
+    self.executing.reset();
+    std::atomic_store_explicit(&self.pending, std::shared_ptr<const Impl::ProgramSlot>{},
+                               std::memory_order_release);
+}
+bool RemapperService::IsRunning() { return GetSnapshot().Running; }
+ServiceSnapshot RemapperService::GetSnapshot() {
+    auto &self = *impl_;
+    std::unique_lock<std::mutex> lock(self.gate, std::try_to_lock);
+    if (!lock) {
+        std::lock_guard<std::mutex> cache(self.cacheGate);
+        return self.cached;
+    }
+    ServiceSnapshot result;
+    const auto native = NativeSnapshot();
+    result.Running = native.running != 0;
+    result.Status = self.started || native.received ? Utf8(native.status) : self.startupMessage;
+    result.Error = Utf8(native.error);
+    result.Received = native.received;
+    result.Forwarded = native.forwarded;
+    result.Changed = native.changed;
+    result.TimerOutputs = native.timer_outputs;
+    result.Faults = native.faults;
+    result.ProcessingMicroseconds = native.processing_microseconds;
+    {
+        std::lock_guard<std::mutex> errors(self.errorGate);
+        if (!self.callbackError.empty())
+            result.Error = self.callbackError + (result.Error.empty() ? "" : "\n" + result.Error);
+    }
+    const auto count = std::min(native.device_count, 256u);
+    result.Devices.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        GR_Device source{};
+        source.size = sizeof(source);
+        if (GR_GetDevice(i, &source))
+            break;
+        ServiceDevice device;
+        device.Key = source.key;
+        device.Family = source.family;
+        device.Name = Utf8(source.name);
+        device.Token = Utf8(source.token);
+        device.Diagnostic = Utf8(source.diagnostic);
+        std::copy_n(source.values, 256, device.Values.begin());
+        std::copy_n(source.output_values, 256, device.OutputValues.begin());
+        for (std::size_t slot = 0; slot < 256; ++slot)
+            device.Available[slot] = source.available[slot] != 0;
+        result.Devices.emplace_back(std::move(device));
+    }
+    {
+        std::lock_guard<std::mutex> cache(self.cacheGate);
+        self.cached = result;
+    }
+    return result;
+}
+} // namespace gpr
