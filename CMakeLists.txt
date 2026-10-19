@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 cmake_policy(SET CMP0091 NEW)
-project(GamePadRemapper VERSION 1.1.0 LANGUAGES CXX)
+project(GamePadRemapper VERSION 1.1.1 LANGUAGES CXX)
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT MSVC)
   message(FATAL_ERROR "Use the Visual Studio 2022 x64 C++ toolchain on Windows.")
 endif()

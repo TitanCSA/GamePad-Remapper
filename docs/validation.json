@@ -1,25 +1,25 @@
 ﻿{
-    "Version":  "1.1.0",
-    "VerifiedUtc":  "2026-10-19T20:14:38.2228766Z",
-    "NativePureChecks":  196829,
+    "Version":  "1.1.1",
+    "VerifiedUtc":  "2026-10-19T20:36:54.6149773Z",
+    "NativePureChecks":  197833,
     "Core":  {
                  "passed":  true,
-                 "tests":  32,
-                 "checks":  78761,
+                 "tests":  38,
+                 "checks":  82775,
                  "benchmark":  {
                                    "scope":  "pure VM; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
                                    "frames":  101000,
-                                   "median_us":  1.143600,
-                                   "p95_us":  1.181500,
-                                   "maximum_batch_average_us":  1.843200,
+                                   "median_us":  1.155900,
+                                   "p95_us":  1.371100,
+                                   "maximum_batch_average_us":  1.767000,
                                    "garbage_collections":  0
                                },
                  "advanced_benchmark":  {
                                             "scope":  "pure VM additive figure-eight; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
                                             "frames":  101000,
-                                            "median_us":  1.512200,
-                                            "p95_us":  2.186500,
-                                            "maximum_batch_average_us":  2.371100,
+                                            "median_us":  1.542200,
+                                            "p95_us":  2.239300,
+                                            "maximum_batch_average_us":  3.708700,
                                             "garbage_collections":  0
                                         }
              },
@@ -57,26 +57,52 @@
                               "Draft recovery is atomic and does not create backup accumulation",
                               "Opening a saved script clears dirty state",
                               "Editing marks the script unsaved",
-                              "Test interface never captures hardware"
+                              "Test interface never captures hardware",
+                              "Automatic checks preserve invalid visual-field errors instead of applying partial edits",
+                              "Cancelling a discard keeps invalid visual edits available",
+                              "Correcting a field to its previous value resumes automatic validation",
+                              "Invalid visual edits can be discarded instead of trapping the editor",
+                              "Saving before discard preserves the valid script and drops invalid fields",
+                              "Replacing a document detaches stale visual fields from the new script",
+                              "Tab cannot edit the code while compilation or injection makes it read only",
+                              "Live monitor reuses its controller card while values and diagnostics change",
+                              "Active controls stay visible behind many idle HID buttons",
+                              "Disconnected controller cards are released",
+                              "An unsaved draft is discoverable without changing any script",
+                              "Recovering a draft opens it as unsaved text",
+                              "Saving a recovered draft retires that recovery file",
+                              "A file that cannot be decoded leaves the previous script and library selection intact",
+                              "Invalid Unicode cannot silently replace a saved script",
+                              "A stopped session is never labelled as an active script"
                           ],
                "CaptureStarted":  false
            },
+    "NativeAddressSanitizer":  {
+                                   "Passed":  true,
+                                   "Checks":  197833,
+                                   "Scope":  "MSVC AddressSanitizer x64 pure codec and relative-scalar regression tests; no driver access"
+                               },
+    "NativeStartupFailure":  {
+                                 "Passed":  true,
+                                 "Iterations":  100,
+                                 "Scope":  "Private fault-injected build of the actual Service worker. Read-only signed-driver probe; initialization fails before capture. Error 21 and ABI 2 final status verified on every attempt."
+                             },
     "Live":  {
                  "Passed":  true,
-                 "PhysicalReports":  238,
-                 "Forwarded":  3361,
-                 "Changed":  3213,
-                 "ScheduledOutputs":  3121,
+                 "PhysicalReports":  242,
+                 "Forwarded":  3393,
+                 "Changed":  3253,
+                 "ScheduledOutputs":  3149,
                  "NormalPhaseFaults":  0,
-                 "MeanWorkerMicroseconds":  212.47184873949575,
-                 "ElapsedSeconds":  31.075777499999997,
-                 "ProcessCpuSeconds":  0.375,
-                 "PrivateBytes":  36876288,
+                 "MeanWorkerMicroseconds":  205.91942148760316,
+                 "ElapsedSeconds":  31.234734,
+                 "ProcessCpuSeconds":  0.625,
+                 "PrivateBytes":  35475456,
                  "Gen0Collections":  1,
                  "GipAdditiveFigureEight":  true,
                  "HidAdditiveFigureEight":  true,
                  "GipDistinctPatternPoints":  20,
-                 "HidDistinctPatternPoints":  19,
+                 "HidDistinctPatternPoints":  24,
                  "ScheduledDuringQuietInput":  true,
                  "RestoredAndIdleWhenConditionCeases":  true,
                  "InvalidSourcePreservedCapture":  true,
@@ -94,20 +120,20 @@
                            "value":  [
                                          {
                                              "Name":  "GamePadRemapper.exe",
-                                             "HostSHA256":  "7CD795BB492BA0F84C9F30E196702243925F5FFA256E278E9890AD9943A3A3E8",
-                                             "GuestSHA256":  "7CD795BB492BA0F84C9F30E196702243925F5FFA256E278E9890AD9943A3A3E8",
+                                             "HostSHA256":  "48618FE4396645AC12A7C0445C5E4874670844858A626755F500E4CBDB1F80D7",
+                                             "GuestSHA256":  "48618FE4396645AC12A7C0445C5E4874670844858A626755F500E4CBDB1F80D7",
                                              "ExactMatch":  true
                                          },
                                          {
                                              "Name":  "GamePadRemapper.Core.dll",
-                                             "HostSHA256":  "AAD7BC52DE30AFF71211E361CFA54FFEDF13E55029AD3F5BE0E80F92A42B6F16",
-                                             "GuestSHA256":  "AAD7BC52DE30AFF71211E361CFA54FFEDF13E55029AD3F5BE0E80F92A42B6F16",
+                                             "HostSHA256":  "60510377A493569D6307104E6AF16E43D1ECABCB9CB37BD5EF8A9EC2804DC99A",
+                                             "GuestSHA256":  "60510377A493569D6307104E6AF16E43D1ECABCB9CB37BD5EF8A9EC2804DC99A",
                                              "ExactMatch":  true
                                          },
                                          {
                                              "Name":  "GamePadRemapper.Native.dll",
-                                             "HostSHA256":  "3C96256CD867EBE993A29FF76B0477203CDB5B423DAFD06422B91C345394CF7F",
-                                             "GuestSHA256":  "3C96256CD867EBE993A29FF76B0477203CDB5B423DAFD06422B91C345394CF7F",
+                                             "HostSHA256":  "805A2724D770536C2713634EF9D296C38AE255377261B1E388F67440B5FC905B",
+                                             "GuestSHA256":  "805A2724D770536C2713634EF9D296C38AE255377261B1E388F67440B5FC905B",
                                              "ExactMatch":  true
                                          }
                                      ],

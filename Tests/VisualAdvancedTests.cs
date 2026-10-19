@@ -32,7 +32,11 @@ internal static class VisualAdvancedTests
     private static string MetadataSource(object macro = null, object rule = null, object constant = null)
     {
         var payload = new Dictionary<string, object> { { "Version", 2 }, { "Macros", macro == null ? new object[0] : new[] { macro } }, { "Rules", rule == null ? new object[0] : new[] { rule } }, { "Constants", constant == null ? new object[0] : new[] { constant } } };
-        string content = "// @document " + Convert.ToBase64String(Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(payload))) + "\n";
+        return RawMetadataSource(new JavaScriptSerializer().Serialize(payload));
+    }
+    private static string RawMetadataSource(string json)
+    {
+        string content = "// @document " + Convert.ToBase64String(Encoding.UTF8.GetBytes(json)) + "\n";
         string hash; using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(content))).Replace("-", "");
         return "main{}\n// <igc-visual-v1>\n// @hash " + hash + "\n" + content + "// </igc-visual-v1>\n";
     }
@@ -194,6 +198,47 @@ internal static class VisualAdvancedTests
         Reject(() => VisualDocument.Parse(MetadataSource(rule: new VisualRule { Kind = (VisualRuleKind)999 })), check, "invalid v2 rule enum rejected before UI rendering");
         Reject(() => VisualDocument.Parse(MetadataSource(rule: new VisualRule { Kind = VisualRuleKind.Deadzone, Value = 100 })), check, "invalid v2 rule range rejected before UI rendering");
         Reject(() => VisualDocument.Parse(MetadataSource(constant: new VisualConstant { Name = "invalid name" })), check, "invalid v2 constant rejected before UI rendering");
+        foreach (string value in new[] { "2147483648", "-2147483649", "\"2147483648\"", "\"NaN\"", "{\"foo\":1}", "null", "[]", "true", "1.5", "\"12\"", "1e999" })
+        {
+            string malformedConstant = "{\"Version\":2,\"Rules\":[],\"Macros\":[],\"Constants\":[{\"Name\":\"CUSTOM\",\"Value\":" + value + "}]}";
+            Reject(() => VisualDocument.Parse(RawMetadataSource(malformedConstant)), check, "metadata scalar type is rejected without coercion or an escaped exception: " + value);
+        }
+        foreach (string malformed in new[]
+        {
+            "{\"Version\":2147483648,\"Rules\":[],\"Macros\":[],\"Constants\":[]}",
+            "{\"Version\":\"2\",\"Rules\":[],\"Macros\":[],\"Constants\":[]}",
+            "{\"Version\":2,\"Rules\":{},\"Macros\":[],\"Constants\":[]}",
+            "{\"Version\":2,\"Rules\":[],\"Macros\":[],\"Constants\":[],\"Unrecognized\":1}",
+            "{\"Version\":2,\"Rules\":[{\"Enabled\":\"false\"}],\"Macros\":[],\"Constants\":[]}",
+            "{\"Version\":2,\"Rules\":[{\"Kind\":\"Remap\"}],\"Macros\":[],\"Constants\":[]}",
+            "{\"Version\":2,\"Rules\":[],\"Macros\":[],\"Constants\":[{\"Name\":12}]}",
+            "{\"Version\":2,\"Rules\":[],\"Macros\":[],\"Constants\":[{\"__type\":\"System.IO.FileInfo\",\"Name\":\"CUSTOM\",\"Value\":1}]}"
+        }) Reject(() => VisualDocument.Parse(RawMetadataSource(malformed)), check, "unexpected metadata fields and JSON types are rejected before typed conversion");
+        foreach (int boundary in new[] { int.MinValue, int.MaxValue })
+        {
+            parsed = VisualDocument.Parse(MetadataSource(constant: new VisualConstant { Name = "CUSTOM", Value = boundary }));
+            check(parsed.Constants[0].Value == boundary, "exact signed metadata boundaries remain lossless");
+        }
+        string longConstant = "A" + new string('b', 99);
+        string customNames = "define A\u00E9 = 1;\ndefine " + longConstant + " = 2;\ndefine __igc_visual_state_0_active = 3;\nmain { set_val(VALUE_1, A\u00E9 + " + longConstant + " + __igc_visual_state_0_active); }";
+        parsed = VisualDocument.Parse(customNames);
+        check(parsed.Constants.Count == 0 && parsed.HasAdvancedCode, "unrepresentable visual constant names remain valid advanced source");
+        parsed.Macros.Add(VisualDocument.CreateFigureEightPreset()); string customNamesBuilt = parsed.BuildSource();
+        check(customNamesBuilt.Contains("define A\u00E9 = 1;") && customNamesBuilt.Contains("define " + longConstant + " = 2;") && customNamesBuilt.Contains("define __igc_visual_state_0_active = 3;"), "Unicode, long and generated-prefix custom constants are preserved exactly");
+        parsed = VisualDocument.Parse(customNamesBuilt); engine = ScriptCompiler.Compile(parsed.BuildSource()).CreateInstance(); frame = Frame(); engine.Execute(frame, 0, 0);
+        check(frame.Values[208] == 6 && parsed.Macros.Count == 1, "custom constants continue to execute beside visual macros after repeated roundtrips");
+        foreach (string originalSource in new[] { "main{}", "", "// Comment-only script", "main {\r\n    // Preserve this comment and closing indent.\r\n    }", "define CUSTOM=7;\nmain { set_val(VALUE_1,CUSTOM);\n\t}\n", customNames })
+        {
+            document = VisualDocument.Parse(originalSource); document.Rules.Add(new VisualRule { Kind = VisualRuleKind.Deadzone, Source = "LX", Value = 8 });
+            string stableSource = document.BuildSource();
+            for (int roundtrip = 0; roundtrip < 100; roundtrip++)
+            {
+                string rebuilt = VisualDocument.Parse(stableSource).BuildSource();
+                check(rebuilt == stableSource, "visual source remains byte-for-byte stable without accumulating whitespace: " + roundtrip + ", original=" + originalSource.Replace("\r", "\\r").Replace("\n", "\\n") + ", lengths=" + stableSource.Length + "/" + rebuilt.Length);
+                stableSource = rebuilt;
+            }
+            if (originalSource.Contains("Preserve this comment")) check(stableSource.Contains("    // Preserve this comment and closing indent.\r\n    \r\n"), "visual rebuild preserves original custom comment and brace indentation");
+        }
         document = VisualDocument.Parse("int __igc_visual_state_0_last; int __igc_macro_0; main{} function __igc_visual_apply(){}"); document.Macros.Add(VisualDocument.CreateFigureEightPreset());
         parsed = VisualDocument.Parse(document.BuildSource()); check(parsed.Macros.Count == 1, "generated state/helper identifiers avoid collisions with advanced code");
 

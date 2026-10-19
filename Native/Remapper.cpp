@@ -69,6 +69,7 @@ struct Report {
     Payload physical;
     std::array<std::uint8_t,256> controls{};
     std::array<int,256> lastOutput{};
+    std::vector<unsigned> relative;
 };
 struct Source {
     std::uint32_t key=0,family=0,id=0;
@@ -78,6 +79,8 @@ struct Source {
     std::array<int,256> physical{},output{};
     std::array<std::uint8_t,256> available{};
     std::vector<Report> reports;
+    std::vector<unsigned> relative;
+    std::array<bool,256> relativeKnown{};
     Time deadline=Time::max();
     bool layoutAttempted=false,layoutSeeded=false;
 };
@@ -201,18 +204,32 @@ class Service {
         if(sent.error||sent.accepted!=1)throw std::system_error(sent.error?sent.error:ERROR_WRITE_FAULT,std::system_category(),"Forward controller report");
     }
     template<class T> bool Physical(Source& source,T& input) {
+        Remapper::ClearRelative(source.physical,source.relative);
         const auto reportId=ReportId(input);
         auto position=std::find_if(source.reports.begin(),source.reports.end(),[&](const auto& report){return report.id==reportId;});
         if(position==source.reports.end()){source.reports.emplace_back();position=source.reports.end()-1;position->id=reportId;}
         auto& report=*position;report.physical=input;Read(source,input,report);
+        if constexpr(std::is_base_of_v<Hid_Decoded_Input,T>) {
+            source.slots.PrepareSynthetic(std::get<T>(report.physical),report.relative);
+            for(const auto slot:report.relative)if(!source.relativeKnown[slot]) {
+                source.relativeKnown[slot]=true;source.relative.push_back(slot);
+            }
+        }
         report.lastOutput=source.physical;
-        if(!Execute(source,0))return false;
-        if(Different(report,source.physical,source.output))++changed_;
-        Apply(source,input);report.lastOutput=source.output;return true;
+        const bool good=Execute(source,0);
+        if(good) {
+            if(Different(report,source.physical,source.output))++changed_;
+            Apply(source,input);
+        }
+        report.lastOutput=source.output;
+        Remapper::ClearRelative(report.lastOutput,report.relative);
+        Remapper::ClearRelative(source.physical,report.relative);
+        Remapper::ClearRelative(source.output,report.relative);
+        return good;
     }
     void RestoreAndReset(bool applyNew) {
         for(auto& entry:sources_) {
-            auto& source=*entry.second;source.deadline=Time::max();source.output=source.physical;
+            auto& source=*entry.second;source.deadline=Time::max();Remapper::ClearRelative(source.physical,source.relative);source.output=source.physical;
             for(auto& report:source.reports) {
                 if(!Different(report,report.lastOutput,source.physical))continue;
                 std::visit([](const auto& input){RequireSend(Send_Input(input));},report.physical);
@@ -226,11 +243,12 @@ class Service {
         for(auto& report:source.reports) {
             if(!Different(report,report.lastOutput,source.output))continue;
             // Reuse one scratch per type: after warmup, assignment reuses HID
-            // vector capacities. The immutable template always holds physical data.
+            // vector capacities. Templates retain absolute physical data and
+            // neutral relative scalars, whose original movement was sent once.
             std::visit([&](const auto& physical) {
                 using T=std::decay_t<decltype(physical)>;thread_local T edited;edited=physical;Apply(source,edited);RequireSend(Send_Input(edited));
             },report.physical);
-            report.lastOutput=source.output;++forwarded_;++changed_;++timerOutputs_;
+            report.lastOutput=source.output;Remapper::ClearRelative(report.lastOutput,report.relative);++forwarded_;++changed_;++timerOutputs_;
         }
     }
     void ArmTimer() {
@@ -251,6 +269,7 @@ class Service {
         std::lock_guard<std::mutex> lock(startMutex_);if(startComplete_)return;startError_=error;startComplete_=true;started_.notify_all();
     }
     void Run() noexcept {
+        DWORD startError=ERROR_GEN_FAILURE;
         try {
             const auto initialized=Init_AllDevices();
             if(initialized.error)throw std::system_error(initialized.error,std::system_category(),"Initialize installed controller filters");
@@ -293,11 +312,12 @@ class Service {
             }
             status_=L"Stopped · physical input passes through";
         }catch(const std::system_error& error) {
-            ++faults_;error_=Explain(static_cast<DWORD>(error.code().value()))+L" ("+std::to_wstring(error.code().value())+L")\n"+Wide(error.what());status_=L"Capture stopped · physical input passes through";CompleteStart(static_cast<DWORD>(error.code().value()));
+            startError=static_cast<DWORD>(error.code().value());
+            ++faults_;error_=Explain(startError)+L" ("+std::to_wstring(startError)+L")\n"+Wide(error.what());status_=L"Capture stopped · physical input passes through";
         }catch(const std::exception& error) {
-            ++faults_;error_=Wide(error.what());status_=L"Script stopped · physical input passes through";CompleteStart(ERROR_GEN_FAILURE);
+            ++faults_;error_=Wide(error.what());status_=L"Script stopped · physical input passes through";
         }catch(...) {
-            ++faults_;error_=L"Unexpected capture failure. Physical input passes through.";status_=L"Capture stopped";CompleteStart(ERROR_GEN_FAILURE);
+            ++faults_;error_=L"Unexpected capture failure. Physical input passes through.";status_=L"Capture stopped";
         }
         stopping_.store(true);SetThreadpoolWait(timerWait_,nullptr,nullptr);CancelWaitableTimer(timer_);
         // Release synthetic held state even when no further physical report is
@@ -308,9 +328,13 @@ class Service {
         for(auto& entry:sources_)entry.second->deadline=Time::max();
         for(auto& entry:sources_)Forget(*entry.second);
         try{Publish(true);}catch(...){}
+        // A failed Start must expose its final ABI/status before waking the
+        // caller, which immediately reads this snapshot to explain the failure.
+        CompleteStart(startError);
     }
 public:
     Service(GR_Callback callback,void* user):callback_(callback),user_(user) {
+        snapshot_.size=sizeof(snapshot_);snapshot_.version=2;Text(snapshot_.status,status_);
         wake_=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!wake_)throw std::system_error(GetLastError(),std::system_category());
         timer_=CreateWaitableTimerExW(nullptr,nullptr,0x00000002,TIMER_ALL_ACCESS);
         if(!timer_){preciseTimer_=false;timer_=CreateWaitableTimerW(nullptr,FALSE,nullptr);}

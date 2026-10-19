@@ -109,6 +109,8 @@ namespace GamePadRemapper.Core
 
     internal sealed class Compiler
     {
+        private static readonly HashSet<string> Keywords = new HashSet<string>(StringComparer.Ordinal)
+        { "define", "const", "int", "main", "init", "combo", "function", "if", "else", "while", "for", "break", "continue", "return", "wait" };
         private readonly string source; private readonly List<Token> tokens; private int position, depth, globalCount;
         private readonly Dictionary<string, int> constants = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<string, Symbol> globals = new Dictionary<string, Symbol>(StringComparer.Ordinal);
@@ -132,7 +134,7 @@ namespace GamePadRemapper.Core
         private void Enter(Token at) { if (++depth > 96) Fail(at, "Syntax nesting exceeds the safe limit (96)."); }
         private void Leave() { depth--; }
         private static int ControlConstant(string name) { return name == name.ToUpperInvariant() ? Controls.Parse(name) : -1; }
-        private bool Reserved(string name) { return constants.ContainsKey(name) || ControlConstant(name) >= 0 || globals.ContainsKey(name) || functionIds.ContainsKey(name) || Builtins.Find(name) >= 0; }
+        private bool Reserved(string name) { return Keywords.Contains(name) || constants.ContainsKey(name) || ControlConstant(name) >= 0 || globals.ContainsKey(name) || functionIds.ContainsKey(name) || Builtins.Find(name) >= 0; }
         internal ScriptProgram Compile()
         {
             while (Current.Text != "<end>")
@@ -165,8 +167,12 @@ namespace GamePadRemapper.Core
                 else if (top.Text == "main" || top.Text == "init" || top.Text == "combo" || top.Text == "function")
                 {
                     var fn = new FunctionNode { Token = top, Name = top.Text, Combo = top.Text == "combo" };
-                    if (top.Text == "combo" || top.Text == "function") fn.Name = Identifier().Text;
-                    if (Reserved(fn.Name)) Fail(top, "Duplicate or reserved function name '" + fn.Name + "'.");
+                    if (top.Text == "combo" || top.Text == "function")
+                    {
+                        fn.Name = Identifier().Text;
+                        if (Reserved(fn.Name)) Fail(top, "Duplicate or reserved function name '" + fn.Name + "'.");
+                    }
+                    else if (functionIds.ContainsKey(fn.Name)) Fail(top, "Duplicate or reserved function name '" + fn.Name + "'.");
                     if (functions.Count >= 96) Fail(top, "At most 96 functions, including main, init and combos, are supported.");
                     functionIds.Add(fn.Name, functions.Count);
                     if (fn.Combo) { if (comboIds.Count >= 32) Fail(top, "At most 32 combos are supported."); comboIds.Add(fn.Name, comboIds.Count); }
@@ -187,6 +193,7 @@ namespace GamePadRemapper.Core
             if (!functionIds.ContainsKey("main")) throw new ScriptException("A script needs a main { ... } block.");
             if (!functionIds.ContainsKey("init"))
             {
+                if (functions.Count >= 96) Fail(Current, "At most 96 functions, including main, init and combos, are supported.");
                 functionIds.Add("init", functions.Count);
                 functions.Add(new FunctionNode { Name = "init", Token = new Token("init", 1, 1), Body = new Statement(new Token("{", 1, 1), "block") { Items = new List<Statement>() } });
             }
@@ -221,7 +228,12 @@ namespace GamePadRemapper.Core
             do
             {
                 var name = Identifier(); var item = new Statement(name, "declaration") { Name = name.Text };
-                if (Take("[")) { item.Size = Current.Text == "]" ? -1 : Constant(ParseExpression()); Expect("]"); if (item.Size == 0 || item.Size < -1 || item.Size > 1024) Fail(name, "Array length must be between 1 and 1,024."); }
+                if (Take("["))
+                {
+                    if (Current.Text == "]") item.Size = -1;
+                    else { item.Size = Constant(ParseExpression()); if (item.Size < 1 || item.Size > 1024) Fail(name, "Array length must be between 1 and 1,024."); }
+                    Expect("]");
+                }
                 if (Take("="))
                 {
                     if (item.Size != 0)
@@ -388,11 +400,18 @@ namespace GamePadRemapper.Core
                 case "empty": return;
                 case "block": case "declarations": foreach (var item in node.Items) CompileStatement(item); return;
                 case "declaration": CompileDeclaration(node, true); return;
-                case "expression": CompileExpression(node.Expr); Emit(Op.Pop, 0, 0, node.Token); return;
+                case "expression":
+                    if (node.Expr.Kind == "call" && node.Expr.Token.Text == "wait")
+                    {
+                        if (!currentFunction.Combo || node.Expr.Args.Count != 1) Fail(node.Expr.Token, "wait(milliseconds) is only valid as a standalone statement directly inside a combo.");
+                        CompileExpression(node.Expr.Args[0]); Emit(Op.Wait, 0, 0, node.Expr.Token); return;
+                    }
+                    CompileExpression(node.Expr); Emit(Op.Pop, 0, 0, node.Token); return;
                 case "if":
                     CompileExpression(node.Condition); int no = Emit(Op.JumpZero, 0, 0, node.Token); CompileStatement(node.Body);
                     if (node.Else == null) Patch(no, code.Count); else { int end = Emit(Op.Jump, 0, 0, node.Token); Patch(no, code.Count); CompileStatement(node.Else); Patch(end, code.Count); } return;
                 case "while": case "for":
+                    if (node.Initializer != null && node.Initializer.Kind == "expression" && node.Initializer.Expr.Kind == "call" && node.Initializer.Expr.Token.Text == "wait") Fail(node.Initializer.Expr.Token, "wait(milliseconds) must be a standalone statement directly inside a combo.");
                     if (node.Initializer != null) CompileStatement(node.Initializer); int start = code.Count, exit = -1;
                     if (node.Condition != null) { CompileExpression(node.Condition); exit = Emit(Op.JumpZero, 0, 0, node.Token); }
                     var loop = new LoopContext(); loops.Push(loop); CompileStatement(node.Body); int increment = code.Count;
@@ -455,8 +474,7 @@ namespace GamePadRemapper.Core
                 case "call":
                     if (at.Text == "wait")
                     {
-                        if (!currentFunction.Combo || expression.Args.Count != 1) Fail(at, "wait(milliseconds) is only valid directly inside a combo.");
-                        CompileExpression(expression.Args[0]); Emit(Op.Wait, 0, 0, at); Emit(Op.Push, 0, 0, at); return;
+                        Fail(at, "wait(milliseconds) must be a standalone statement directly inside a combo."); return;
                     }
                     int builtin = Builtins.Find(at.Text), function;
                     if (builtin >= 0)

@@ -46,7 +46,7 @@ activity. Normal use displays actual driver state and never invents devices.
 
 Windows 10/11 **x64**, .NET Framework **4.8**.
 
-1. Download and extract `GamePad-Remapper-1.1.0-win-x64.zip`. Keep the EXE and
+1. Download and extract `GamePad-Remapper-1.1.1-win-x64.zip`. Keep the EXE and
    both DLLs together. The ZIP includes example scripts and the driver installer.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete

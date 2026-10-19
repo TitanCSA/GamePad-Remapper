@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Web.Script.Serialization;
+using System.Reflection;
 
 namespace GamePadRemapper.Core
 {
@@ -88,7 +89,10 @@ namespace GamePadRemapper.Core
         public List<VisualMacro> Macros { get; } = new List<VisualMacro>();
         public bool HasAdvancedCode { get; private set; }
         public bool ManagedSectionModified { get; private set; }
-        private static readonly Regex IntegerDefines = new Regex(@"\bdefine\s+([A-Za-z_]\w*)\s*=\s*(-?(?:0[xX][0-9a-fA-F]+|[0-9]+))\s*;", RegexOptions.CultureInvariant);
+        private static readonly Dictionary<Type, Dictionary<string, Type>> MetadataFields = CreateMetadataFields();
+        // Only names representable by the visual editor are owned here. Other valid
+        // language identifiers remain ordinary advanced source, unchanged.
+        private static readonly Regex IntegerDefines = new Regex(@"\bdefine\s+((?!__igc_)[A-Za-z_][A-Za-z_0-9]{0,79})\s*=\s*(-?(?:0[xX][0-9a-fA-F]+|[0-9]+))\s*;", RegexOptions.CultureInvariant);
         private VisualDocument(string source) { original = source; }
         public static VisualDocument Parse(string source)
         {
@@ -177,9 +181,13 @@ namespace GamePadRemapper.Core
             try
             {
                 byte[] bytes = Convert.FromBase64String(encoded);
-                payload = Serializer().Deserialize<Payload>(new UTF8Encoding(false, true).GetString(bytes));
+                string json = new UTF8Encoding(false, true).GetString(bytes);
+                // JavaScriptSerializer's typed conversion accepts objects as integer zero
+                // and lets numeric conversion exceptions escape. Check exact JSON types first.
+                ValidateMetadataValue(Serializer().DeserializeObject(json), typeof(Payload), 0);
+                payload = Serializer().Deserialize<Payload>(json);
             }
-            catch (Exception error) when (error is ArgumentException || error is InvalidOperationException || error is FormatException || error is DecoderFallbackException)
+            catch (Exception error) when (error is ArgumentException || error is InvalidOperationException || error is FormatException || error is DecoderFallbackException || error is OverflowException)
             { throw new ScriptException("Malformed visual document metadata."); }
             if (payload == null || payload.Version != 2 || payload.Rules == null || payload.Constants == null || payload.Macros == null || payload.Rules.Count > 256 || payload.Constants.Count > 256 || payload.Macros.Count > 32) throw new ScriptException("Invalid visual document metadata version or limits.");
             foreach (VisualMacro macro in payload.Macros)
@@ -188,6 +196,54 @@ namespace GamePadRemapper.Core
                 int nodes = 0; ValidateCondition(macro.Condition, 0, ref nodes, new HashSet<VisualCondition>());
             }
             return payload;
+        }
+        private static Dictionary<Type, Dictionary<string, Type>> CreateMetadataFields()
+        {
+            var result = new Dictionary<Type, Dictionary<string, Type>>();
+            foreach (Type type in new[] { typeof(Payload), typeof(VisualRule), typeof(VisualConstant), typeof(VisualMacro), typeof(VisualMacroStep), typeof(VisualAxisPattern), typeof(VisualCondition) })
+            {
+                var fields = new Dictionary<string, Type>(StringComparer.Ordinal);
+                foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance)) fields.Add(property.Name, property.PropertyType);
+                result.Add(type, fields);
+            }
+            return result;
+        }
+        private static void ValidateMetadataValue(object value, Type expected, int depth)
+        {
+            if (depth > 48) throw new ScriptException("Visual metadata exceeds its nesting limit.");
+            if (value == null)
+            {
+                if (expected.IsValueType) throw new ScriptException("A visual metadata value has the wrong type.");
+                return;
+            }
+            if (expected.IsEnum)
+            {
+                if (!(value is int) || !Enum.IsDefined(expected, value)) throw new ScriptException("Invalid visual metadata enumeration.");
+                return;
+            }
+            if (expected == typeof(int) || expected == typeof(bool) || expected == typeof(string))
+            {
+                if (value.GetType() != expected) throw new ScriptException("A visual metadata value has the wrong type.");
+                return;
+            }
+            if (expected.IsGenericType && expected.GetGenericTypeDefinition() == typeof(List<>))
+            {
+                var items = value as object[];
+                if (items == null) throw new ScriptException("A visual metadata list has the wrong type.");
+                Type element = expected.GetGenericArguments()[0];
+                int maximum = element == typeof(VisualMacro) ? 32 : element == typeof(VisualCondition) ? 16 : 256;
+                if (items.Length > maximum) throw new ScriptException("A visual metadata list exceeds its item limit.");
+                foreach (object item in items) ValidateMetadataValue(item, element, depth + 1);
+                return;
+            }
+            var entries = value as Dictionary<string, object>; Dictionary<string, Type> fields;
+            if (entries == null || !MetadataFields.TryGetValue(expected, out fields)) throw new ScriptException("A visual metadata object has the wrong type.");
+            foreach (KeyValuePair<string, object> entry in entries)
+            {
+                Type property;
+                if (!fields.TryGetValue(entry.Key, out property)) throw new ScriptException("Unknown visual metadata field '" + entry.Key + "'.");
+                ValidateMetadataValue(entry.Value, property, depth + 1);
+            }
         }
         private static void ValidateImportedRows(List<VisualRule> rules, List<VisualMacro> macros, List<VisualConstant> constants)
         {
@@ -261,7 +317,11 @@ namespace GamePadRemapper.Core
             int start = source.IndexOf(Begin, StringComparison.Ordinal), finish = source.IndexOf(End, StringComparison.Ordinal);
             if ((start < 0) != (finish < 0) || start >= 0 && finish < start) throw new ScriptException("Visual section markers are incomplete.");
             if (start >= 0) source = source.Remove(start, finish + End.Length - start);
-            return Regex.Replace(source, @"/\* @igc-visual-call \*/ __igc_visual_apply(?:_[0-9]+)?\(\);", "", RegexOptions.CultureInvariant);
+            const string call = @"/\* @igc-visual-call \*/ __igc_visual_apply(?:_[0-9]+)?\(\);";
+            // Remove the exact insertion owned by BuildSource, including both newlines.
+            // Removing just the statement leaves another indented blank line on every edit.
+            source = Regex.Replace(source, @"\r?\n    " + call + @"\r?\n", "", RegexOptions.CultureInvariant);
+            return Regex.Replace(source, call, "", RegexOptions.CultureInvariant);
         }
         private static string Hash(string text)
         {
@@ -522,7 +582,7 @@ namespace GamePadRemapper.Core
                 }
                 mainStart = i; break;
             }
-            if (mainStart < 0) advanced += Environment.NewLine + "main { " + callMarker + " }" + Environment.NewLine;
+            if (mainStart < 0) advanced += Environment.NewLine + "main {" + Environment.NewLine + "    " + callMarker + Environment.NewLine + "}" + Environment.NewLine;
             else { if (mainEnd < 0) throw new ScriptException("The main block is incomplete."); advanced = advanced.Insert(mainEnd, Environment.NewLine + "    " + callMarker + Environment.NewLine); }
             var payload = new Payload { Version = 2, Rules = Rules, Macros = Macros, Constants = new List<VisualConstant>() };
             foreach (VisualConstant item in Constants) if (item.OriginalStart < 0) payload.Constants.Add(item);

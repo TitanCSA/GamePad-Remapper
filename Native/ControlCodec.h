@@ -71,7 +71,7 @@ struct KeyHash {
 inline FieldKey Key(const Interceptor::Hid_Value& value,unsigned kind) noexcept {
     // Relative and constant-range scalars have no meaningful percentage.
     // Expose their exact integer under VALUE_n rather than clipping AXIS_n.
-    if((kind==1||kind==2)&&(value.relative||value.maximum<=value.minimum))kind=4;
+    if((kind>=1&&kind<=3&&value.relative)||((kind==1||kind==2)&&value.maximum<=value.minimum))kind=4;
     return {value.usage_page,value.usage,value.link_collection,value.data_index,value.element,value.report_id,static_cast<std::uint8_t>(kind)};
 }
 inline FieldKey Key(const Interceptor::Hid_Button& button) noexcept {
@@ -125,9 +125,9 @@ public:
         for(auto& button:input.state.buttons){const auto slot=Find(Key(button));if(slot<256&&output[slot]!=physical[slot])button.pressed=output[slot]>0;}
         std::vector<Interceptor::Hid_Value>* lists[]{&input.state.axes,&input.state.triggers,&input.state.hats,&input.state.values};
         for(unsigned i=0;i<4;++i)for(auto& value:*lists[i]) {
-            const auto slot=Find(Key(value,i+1));if(slot>=256||output[slot]==physical[slot])continue;
-            if((i==0||i==1)&&value.normalized_valid)value.normalized=std::clamp(output[slot]/100.0,i==0?-1.0:0.0,1.0);
-            else if(i==2) {
+            const auto key=Key(value,i+1);const auto slot=Find(key);if(slot>=256||output[slot]==physical[slot])continue;
+            if((key.kind==1||key.kind==2)&&value.normalized_valid)value.normalized=std::clamp(output[slot]/100.0,key.kind==1?-1.0:0.0,1.0);
+            else if(key.kind==3) {
                 if(output[slot]<0&&value.has_null){
                     const auto lower=value.minimum<0?-(1ll<<(value.bit_size-1)):0;
                     const auto upper=value.minimum<0?(1ll<<(value.bit_size-1))-1:static_cast<std::int64_t>((1ull<<value.bit_size)-1);
@@ -140,6 +140,19 @@ public:
             }else value.value=std::clamp(static_cast<std::int64_t>(output[slot]),value.minimum,value.maximum);
         }
     }
+    // A relative scalar describes one movement, not held state. Reusing its last
+    // report for an unrelated button/axis macro must not replay that movement.
+    void PrepareSynthetic(Interceptor::Hid_Decoded_Input& input,std::vector<unsigned>& relative) const {
+        relative.clear();
+        std::vector<Interceptor::Hid_Value>* lists[]{&input.state.axes,&input.state.triggers,&input.state.hats,&input.state.values};
+        for(unsigned kind=0;kind<4;++kind)for(auto& value:*lists[kind])if(value.relative) {
+            const auto slot=Find(Key(value,kind+1));if(slot<256)relative.push_back(slot);
+            value.value=0;value.is_null=false;
+        }
+    }
 };
+inline void ClearRelative(std::array<int,256>& values,const std::vector<unsigned>& slots) noexcept {
+    for(const auto slot:slots)values[slot]=0;
+}
 inline std::uint64_t SourceKey(unsigned family,unsigned id) noexcept {return (static_cast<std::uint64_t>(family)<<32)|id;}
 }

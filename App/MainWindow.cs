@@ -22,6 +22,7 @@ namespace GamePadRemapper
     internal sealed partial class MainWindow : Window
     {
         private static readonly string[] ControlNames = Controls.Names.Where(name => !name.StartsWith("RESERVED_", StringComparison.Ordinal)).ToArray();
+        private static readonly string ApplicationVersion = typeof(MainWindow).Assembly.GetName().Version.ToString(3);
         private const string EmptyScript = "// GamePad Remapper · IGC\n// Use the visual editor or write your own controller logic.\n\nmain {\n}\n";
         private readonly RemapperService service = new RemapperService();
         private readonly DispatcherTimer refreshTimer;
@@ -40,6 +41,8 @@ namespace GamePadRemapper
         private readonly TextBlock timing = Theme.Label("Transform + forward: —", 11, Theme.Muted);
         private readonly TextBlock codePosition = Theme.Label("Ln 1, Col 1", 11, Theme.Muted);
         private readonly StackPanel devices = new StackPanel();
+        private readonly Dictionary<uint, ControllerCard> controllerCards = new Dictionary<uint, ControllerCard>();
+        private uint[] renderedDeviceKeys = new uint[0];
         private readonly StackPanel visualContent = new StackPanel();
         private readonly TextBox diagnostics = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 11, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 150 };
         private readonly ContentControl editorHost = new ContentControl();
@@ -59,7 +62,6 @@ namespace GamePadRemapper
         private bool closeAllowed;
         private bool closing;
         private ulong lastReceived;
-        private string lastDeviceFingerprint;
         private string lastDiagnostics;
         private int refreshTicks;
 
@@ -346,7 +348,8 @@ namespace GamePadRemapper
             string path = (string)selected.Tag;
             if (String.Equals(path, currentPath, StringComparison.OrdinalIgnoreCase)) return;
             if (!ConfirmDiscard()) { LoadLibrary(); return; }
-            OpenPath(path);
+            try { OpenPath(path); }
+            catch (Exception exception) { SetError(exception); LoadLibrary(); }
         }
 
         internal void OpenPath(string path)
@@ -358,11 +361,25 @@ namespace GamePadRemapper
 
         private void SetSource(string source, string path, bool modified)
         {
-            currentPath = path;
-            savedSource = modified ? "" : source;
-            code.Text = source;
-            if (visualMode) ShowVisual();
-            UpdateTitle();
+            bool showVisual = visualMode;
+            loadingDocument = true;
+            visualMode = false;
+            visualDocument = null;
+            try
+            {
+                ++documentRevision;
+                DeleteOwnDraft();
+                DeleteRecoveredDraft();
+                invalidVisualInputs.Clear();
+                visualCommitFailed = false;
+                visualValidationBlocked = false;
+                currentPath = path;
+                savedSource = modified ? "" : source;
+                code.Text = source;
+                if (showVisual) ShowVisual();
+                UpdateTitle();
+            }
+            finally { loadingDocument = false; }
         }
 
         private void OnSourceChanged()
@@ -409,9 +426,9 @@ namespace GamePadRemapper
             if (dialog.ShowDialog(this) == true) OpenPath(dialog.FileName);
         }
 
-        private bool SaveScript(bool saveAs)
+        private bool SaveScript(bool saveAs, bool requireValidVisualFields = true)
         {
-            if (!CommitFocusedVisualField()) return false;
+            if (requireValidVisualFields && !CommitFocusedVisualField()) return false;
             string path = currentPath;
             if (path == null || saveAs)
             {
@@ -425,16 +442,20 @@ namespace GamePadRemapper
             LoadLibrary();
             UpdateTitle();
             DeleteOwnDraft();
+            DeleteRecoveredDraft();
             footer.Text = "Saved " + Path.GetFileName(path) + " · previous version kept in .bak";
             return true;
         }
 
         private bool ConfirmDiscard()
         {
-            if (!CommitFocusedVisualField()) return false;
-            if (String.Equals(code.Text, savedSource, StringComparison.Ordinal)) return true;
-            var result = MessageBox.Show(this, "Save your changes before continuing?", "Unsaved script", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveScript(false));
+            bool validVisualFields = CommitFocusedVisualField();
+            if (String.Equals(code.Text, savedSource, StringComparison.Ordinal) && validVisualFields) return true;
+            string message = validVisualFields ? "Save your changes before continuing?" : "Some visual fields are invalid and have not been applied.\n\nSave the last valid script before continuing?\nYes saves the valid script and discards those fields; No discards the edits; Cancel returns to the editor.";
+            var result = confirmDiscardPrompt == null ? MessageBox.Show(this, message, "Unsaved script", MessageBoxButton.YesNoCancel, MessageBoxImage.Question) : confirmDiscardPrompt(message);
+            bool proceed = result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveScript(false, validVisualFields));
+            if (proceed && !validVisualFields) ResetVisualToSource();
+            return proceed;
         }
 
         internal void ShowCode()
@@ -527,34 +548,40 @@ namespace GamePadRemapper
 
         private UIElement ControlPicker(string text, string value, Action<string> set)
         {
+            var document = visualDocument;
             var selector = new ComboBox { IsEditable = true, ItemsSource = editorControlNames, Text = value, ToolTip = "Reported controls appear first while connected. SOUTH = Xbox A / PlayStation Cross; EAST = B / Circle. Generic HID: use reported AXIS_1, BUTTON_1, TRIGGER_1…" };
-            selector.LostKeyboardFocus += (sender, args) => set(selector.Text.Trim());
-            selector.SelectionChanged += (sender, args) => { var selected = selector.SelectedItem as string; if (selected != null) set(selected); };
+            selector.LostKeyboardFocus += (sender, args) => { if (!loadingDocument && ReferenceEquals(document, visualDocument)) set(selector.Text.Trim()); };
+            selector.SelectionChanged += (sender, args) => { if (loadingDocument || !ReferenceEquals(document, visualDocument)) return; var selected = selector.SelectedItem as string; if (selected != null) set(selected); };
             return Field(text, selector, 111);
         }
 
-        private static UIElement TextField(string text, string value, Action<string> set, double width)
+        private UIElement TextField(string text, string value, Action<string> set, double width)
         {
+            var document = visualDocument;
             var input = new TextBox { Text = value };
-            input.LostKeyboardFocus += (sender, args) => set(input.Text.Trim());
+            input.LostKeyboardFocus += (sender, args) => { if (!loadingDocument && ReferenceEquals(document, visualDocument)) set(input.Text.Trim()); };
             return Field(text, input, width);
         }
 
         private UIElement NumberField(string text, int value, Action<int> set)
         {
+            var document = visualDocument;
             var input = new TextBox { Text = value.ToString(CultureInfo.InvariantCulture) };
-            input.LostKeyboardFocus += (sender, args) => { int parsed; if (Int32.TryParse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)) { invalidVisualInputs.Remove(input); set(parsed); input.BorderBrush = Theme.Brush("#334461"); } else { invalidVisualInputs.Add(input); input.BorderBrush = Theme.Danger; compileStatus.Text = "Enter a whole number for " + text + "."; compileStatus.Foreground = Theme.Danger; } };
+            input.LostKeyboardFocus += (sender, args) => { if (loadingDocument || !ReferenceEquals(document, visualDocument)) return; int parsed; if (Int32.TryParse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)) { invalidVisualInputs.Remove(input); set(parsed); input.BorderBrush = Theme.Brush("#334461"); } else { invalidVisualInputs.Add(input); input.BorderBrush = Theme.Danger; compileStatus.Text = "Enter a whole number for " + text + "."; compileStatus.Foreground = Theme.Danger; } };
             return Field(text, input, 91);
         }
 
         private void CommitVisual(bool rebuild)
         {
+            if (loadingDocument || visualDocument == null || editingDisposed) return;
             try
             {
                 string result = visualDocument.BuildSource();
                 visualCommitFailed = false;
                 synchronizing = true;
+                bool sourceUnchanged = String.Equals(code.Text, result, StringComparison.Ordinal);
                 code.Text = result;
+                if (sourceUnchanged && visualValidationBlocked && invalidVisualInputs.Count == 0) { visualValidationBlocked = false; QueueAutomaticValidation(); }
                 compileStatus.Text = "Visual changes saved in code · inject to apply";
                 compileStatus.Foreground = Theme.Muted;
                 if (rebuild) RebuildVisual();
@@ -648,10 +675,11 @@ namespace GamePadRemapper
             {
                 ScriptProgram program = await CompileInBackground();
                 if (program == null) return;
-                if (!IsAdministrator()) { RelaunchElevated(); return; }
+                string appliedSource = code.Text;
+                if (!IsAdministrator()) { await RelaunchElevatedAsync(); return; }
                 footer.Text = "Connecting to Interceptor Gamepad Controller…";
                 await Task.Run(() => service.Inject(program));
-                activeSource = code.Text;
+                activeSource = appliedSource;
                 operationError = "";
                 footer.Text = liveApply.IsChecked == true ? "Configuration active · valid edits apply automatically" : "Configuration active · choose Inject to apply further edits";
                 compileStatus.Text = "✓ Configuration applied atomically";
@@ -661,11 +689,20 @@ namespace GamePadRemapper
             finally { SetBusy(false); RefreshService(); }
         }
 
-        private void RelaunchElevated()
+        private async Task RelaunchElevatedAsync()
         {
             string sessionDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GamePadRemapper", "Sessions");
             Directory.CreateDirectory(sessionDirectory);
-            string pending = Path.Combine(sessionDirectory, Guid.NewGuid().ToString("N") + ".igc");
+            string pending = Path.Combine(sessionDirectory, Path.GetFileName(draftPath));
+            try
+            {
+                await draftWrite;
+                string source = code.Text;
+                draftWrite = Task.Run(() => ScriptStorage.WriteDraft(draftPath, source));
+                await draftWrite;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
             ScriptStorage.Write(pending, code.Text);
             try
             {
@@ -692,6 +729,8 @@ namespace GamePadRemapper
             string original = String.IsNullOrWhiteSpace(origin) ? null : Path.GetFullPath(origin);
             SetSource(source, original, true);
             if (original != null && File.Exists(original)) savedSource = ScriptStorage.Read(original);
+            string previousDraft = Path.Combine(recoveryDirectory, Path.GetFileName(full));
+            if (File.Exists(previousDraft)) recoveredDraftPath = previousDraft;
             File.Delete(full);
             UpdateTitle();
         }
@@ -703,13 +742,14 @@ namespace GamePadRemapper
         {
             if (busy || preview) return;
             SetBusy(true);
-            try { await Task.Run(() => service.Stop()); operationError = ""; footer.Text = "Session stopped · normal controller input restored"; }
+            try { await Task.Run(() => service.Stop()); activeSource = null; operationError = ""; compileStatus.Text = "Session stopped · choose Inject to apply this script"; compileStatus.Foreground = Theme.Muted; footer.Text = "Session stopped · normal controller input restored"; }
             catch (Exception exception) { SetError(exception); }
             finally { SetBusy(false); RefreshService(); }
         }
 
         private void SetBusy(bool value)
         {
+            if (editingDisposed) return;
             busy = value;
             code.IsReadOnly = value;
             visualContent.IsEnabled = !value;
@@ -724,11 +764,12 @@ namespace GamePadRemapper
 
         private void RefreshService()
         {
-            if (preview || busy) return;
+            if (preview || busy || editingDisposed) return;
             try
             {
                 var snapshot = service.GetSnapshot();
                 bool running = snapshot.Running;
+                if (!running) activeSource = null;
                 refreshTimer.Interval = TimeSpan.FromMilliseconds(running ? 150 : 1000);
                 liveStatus.Text = running ? "●  Configuration active" : "○  Not capturing";
                 liveStatus.Foreground = running ? Theme.Mint : Theme.Muted;
@@ -738,39 +779,10 @@ namespace GamePadRemapper
                 stop.IsEnabled = !busy && running;
                 if (!busy) activity.Value = snapshot.Received > lastReceived ? 100 : (running ? 16 : 0);
                 lastReceived = snapshot.Received;
-                string fingerprint = String.Join("|", snapshot.Devices.Select(device => device.Token + ":" + device.Name + ":" + device.Diagnostic + ":" + String.Join(",", device.Available ?? new bool[0]) + ":" + String.Join(",", device.Values ?? new int[0]) + ":" + String.Join(",", device.OutputValues ?? new int[0])));
-                if (!String.Equals(fingerprint, lastDeviceFingerprint, StringComparison.Ordinal))
-                {
-                    lastDeviceFingerprint = fingerprint;
-                    devices.Children.Clear();
-                    foreach (var device in snapshot.Devices)
-                    {
-                        var card = new StackPanel();
-                        card.Children.Add(Theme.Label(device.Name, 13));
-                        int availableCount = device.Available == null ? 0 : device.Available.Count(value => value);
-                        card.Children.Add(new TextBlock { Text = FamilyName(device.Family) + "  ·  " + availableCount + " controls available\n" + device.Token, FontSize = 10, Foreground = Theme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 8) });
-                        if (device.Family == 3) card.Children.Add(new TextBlock { Text = "Generic HID: use the reported AXIS / BUTTON / VALUE fields. Console face names apply only when a mapping is known.", FontSize = 10, Foreground = Theme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
-                        if (device.Values != null && device.Controls != null)
-                        {
-                            var values = new StringBuilder();
-                            for (int i = 0; i < device.Values.Length && i < device.Controls.Length; ++i)
-                            {
-                                if (device.Available != null && i < device.Available.Length && !device.Available[i]) continue;
-                                if (values.Length > 0) values.Append("  ");
-                                values.Append(device.Controls[i]).Append(' ').Append(device.Values[i]);
-                                if (device.OutputValues != null && i < device.OutputValues.Length && device.OutputValues[i] != device.Values[i]) values.Append(" → ").Append(device.OutputValues[i]);
-                                if (values.Length > 200) { values.Append(" …"); break; }
-                            }
-                            card.Children.Add(Theme.Label(values.Length == 0 ? "Waiting for a physical report" : values.ToString(), 11, Theme.Mint));
-                        }
-                        if (!String.IsNullOrWhiteSpace(device.Diagnostic)) card.Children.Add(Theme.Label(device.Diagnostic, 10, Theme.Muted));
-                        devices.Children.Add(VisualCard(card));
-                    }
-                    if (snapshot.Devices.Length == 0) devices.Children.Add(Theme.Label(running ? "Waiting for compatible controllers. Move a stick or press a button to see input." : "Choose Inject to connect to the driver. Editing never captures inputs.", 12, Theme.Muted));
-                }
+                RefreshControllers(snapshot.Devices, running);
                 if (++refreshTicks % 4 == 0 || lastDiagnostics == null || !String.IsNullOrWhiteSpace(snapshot.Error))
                 {
-                    string text = "GamePad Remapper 1.1\nInterceptor Gamepad Controller\n\n" + snapshot.Status + "\n\nReceived: " + snapshot.Received + "\nForwarded: " + snapshot.Forwarded + "\nSoftware processing: " + snapshot.ProcessingMicroseconds.ToString("0.00", CultureInfo.InvariantCulture) + " µs\nControllers: " + snapshot.Devices.Length + "\nAdministrator: " + IsAdministrator() + "\n\n" + snapshot.Error + (String.IsNullOrWhiteSpace(operationError) ? "" : "\nLast operation: " + operationError) + "\n\nDriver demo: 2 hours after the first capture per Windows boot.\nTiming excludes controller/USB/display latency.";
+                    string text = "GamePad Remapper " + ApplicationVersion + "\nInterceptor Gamepad Controller\n\n" + snapshot.Status + "\n\nReceived: " + snapshot.Received + "\nForwarded: " + snapshot.Forwarded + "\nSoftware processing: " + snapshot.ProcessingMicroseconds.ToString("0.00", CultureInfo.InvariantCulture) + " µs\nControllers: " + snapshot.Devices.Length + "\nAdministrator: " + IsAdministrator() + "\n\n" + snapshot.Error + (String.IsNullOrWhiteSpace(operationError) ? "" : "\nLast operation: " + operationError) + "\n\nDriver demo: 2 hours after the first capture per Windows boot.\nTiming excludes controller/USB/display latency.";
                     if (!String.Equals(lastDiagnostics, text, StringComparison.Ordinal)) { diagnostics.Text = text; lastDiagnostics = text; }
                 }
             }
@@ -780,6 +792,93 @@ namespace GamePadRemapper
         private static string FamilyName(uint family)
         {
             switch (family) { case 3: return "HID"; case 4: return "XUSB"; case 5: return "XInput HID"; case 6: return "GIP"; default: return "Controller · family " + family; }
+        }
+
+        private sealed class ControllerCard
+        {
+            internal uint Family;
+            internal readonly TextBlock Name = Theme.Label("", 13);
+            internal readonly TextBlock Details = Theme.Label("", 10, Theme.Muted);
+            internal readonly TextBlock Values = Theme.Label("", 11, Theme.Mint);
+            internal readonly TextBlock Diagnostic = Theme.Label("", 10, Theme.Muted);
+            internal Border View;
+        }
+
+        private void RefreshControllers(ServiceDevice[] connected, bool running)
+        {
+            bool topologyChanged = connected.Length != renderedDeviceKeys.Length;
+            for (int index = 0; !topologyChanged && index < connected.Length; ++index)
+            {
+                ControllerCard card;
+                topologyChanged = renderedDeviceKeys[index] != connected[index].Key || !controllerCards.TryGetValue(connected[index].Key, out card) || card.Family != connected[index].Family;
+            }
+            if (topologyChanged)
+            {
+                devices.Children.Clear();
+                controllerCards.Clear();
+                renderedDeviceKeys = new uint[connected.Length];
+                for (int index = 0; index < connected.Length; ++index)
+                {
+                    var device = connected[index];
+                    var card = new ControllerCard { Family = device.Family };
+                    var content = new StackPanel();
+                    content.Children.Add(card.Name);
+                    card.Details.Margin = new Thickness(0, 5, 0, 8);
+                    content.Children.Add(card.Details);
+                    if (device.Family == 3) content.Children.Add(Theme.Label("Generic HID: use the reported AXIS / BUTTON / VALUE fields. Console face names apply only when a mapping is known.", 10, Theme.Muted));
+                    card.Values.ToolTip = "Physical input → modified output. Changed and active controls appear first.";
+                    content.Children.Add(card.Values);
+                    content.Children.Add(card.Diagnostic);
+                    card.View = VisualCard(content);
+                    controllerCards[device.Key] = card;
+                    renderedDeviceKeys[index] = device.Key;
+                    devices.Children.Add(card.View);
+                }
+            }
+            foreach (var device in connected)
+            {
+                var card = controllerCards[device.Key];
+                SetText(card.Name, device.Name);
+                int available = device.Available == null ? 0 : device.Available.Count(value => value);
+                SetText(card.Details, FamilyName(device.Family) + " · " + available + " controls available\n" + device.Token);
+                SetText(card.Values, FormatControllerValues(device));
+                SetText(card.Diagnostic, device.Diagnostic);
+                card.Diagnostic.Visibility = String.IsNullOrWhiteSpace(device.Diagnostic) ? Visibility.Collapsed : Visibility.Visible;
+            }
+            if (connected.Length == 0)
+            {
+                string text = running ? "Waiting for compatible controllers. Move a stick or press a button to see input." : "Choose Inject to connect to the driver. Editing never captures inputs.";
+                var hint = devices.Children.Count == 1 ? devices.Children[0] as TextBlock : null;
+                if (hint == null) { devices.Children.Clear(); devices.Children.Add(Theme.Label(text, 12, Theme.Muted)); }
+                else SetText(hint, text);
+            }
+        }
+
+        private static void SetText(TextBlock target, string value)
+        {
+            value = value ?? "";
+            if (!String.Equals(target.Text, value, StringComparison.Ordinal)) target.Text = value;
+        }
+
+        private static string FormatControllerValues(ServiceDevice device)
+        {
+            if (device.Values == null || device.Controls == null) return "Waiting for a physical report";
+            var text = new StringBuilder();
+            int count = Math.Min(device.Values.Length, device.Controls.Length), shown = 0;
+            // A moving control remains visible even on controllers with many idle buttons.
+            for (int phase = 0; phase < 3; ++phase)
+                for (int index = 0; index < count; ++index)
+                {
+                    if (device.Available != null && (index >= device.Available.Length || !device.Available[index])) continue;
+                    bool changed = device.OutputValues != null && index < device.OutputValues.Length && device.OutputValues[index] != device.Values[index];
+                    bool active = index >= 192 && index < 208 ? device.Values[index] >= 0 : device.Values[index] != 0;
+                    if (phase == 0 ? !changed : phase == 1 ? changed || !active : changed || active) continue;
+                    if (shown++ >= 12 || text.Length >= 200) return text.Append(" …").ToString();
+                    if (text.Length > 0) text.Append("  ");
+                    text.Append(device.Controls[index]).Append(' ').Append(device.Values[index]);
+                    if (changed) text.Append(" → ").Append(device.OutputValues[index]);
+                }
+            return text.Length == 0 ? "Waiting for a physical report" : text.ToString();
         }
 
         private void ShowPreviewData()
@@ -839,7 +938,14 @@ namespace GamePadRemapper
 
         private void EditorKeyDown(object sender, KeyEventArgs args)
         {
-            if (args.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None) { code.SelectedText = "    "; code.CaretIndex += code.SelectionLength; args.Handled = true; }
+            if (code.IsReadOnly || busy) return;
+            if (args.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None)
+            {
+                int start = code.SelectionStart;
+                code.SelectedText = "    ";
+                code.Select(start + 4, 0);
+                args.Handled = true;
+            }
         }
 
         private void WindowKeyDown(object sender, KeyEventArgs args)
@@ -870,6 +976,7 @@ namespace GamePadRemapper
                 await Task.Run(() => service.Stop());
                 try { await draftWrite; } catch (IOException) { } catch (UnauthorizedAccessException) { }
                 DeleteOwnDraft();
+                DeleteRecoveredDraft();
                 closeAllowed = true;
                 Close();
             }

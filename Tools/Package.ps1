@@ -2,7 +2,7 @@
 param([string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
-$version='1.1.0'
+$version='1.1.1'
 $out=Join-Path $root 'bin'
 $dist=Join-Path $root 'dist'
 $stage=Join-Path $root ('obj\Package-'+[Guid]::NewGuid().ToString('N'))

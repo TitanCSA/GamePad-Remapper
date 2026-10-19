@@ -26,8 +26,10 @@ namespace GamePadRemapper
         private string[] editorControlNames = ControlNames;
         private DispatcherTimer validationTimer;
         private Task draftWrite = Task.CompletedTask;
-        private string draftPath, recoveryDirectory, activeSource;
-        private bool automaticValidationRunning, visualCommitFailed, editingDisposed;
+        private string draftPath, recoveryDirectory, recoveredDraftPath, activeSource;
+        private long documentRevision;
+        private Func<string, MessageBoxResult> confirmDiscardPrompt;
+        private bool automaticValidationRunning, visualCommitFailed, editingDisposed, loadingDocument, visualValidationBlocked;
         private int lastLineCount;
         private int automaticValidationCount;
         private long acceptedValidationVersion;
@@ -62,12 +64,15 @@ namespace GamePadRemapper
             ++automaticValidationCount;
             string source = code.Text;
             long version = compilation.Version;
+            long document = documentRevision;
             try
             {
                 var result = await compilation.CompileAsync(source, version);
                 if (!compilation.IsCurrent(result) || editingDisposed || closing || busy || !String.Equals(code.Text, source, StringComparison.Ordinal)) return;
                 acceptedValidationVersion = version;
-                if (result.Error != null) SetError(result.Error, false);
+                visualValidationBlocked = visualMode && (invalidVisualInputs.Count != 0 || visualCommitFailed);
+                if (visualValidationBlocked) { /* Keep the visual-field error; do not apply a partial visual edit. */ }
+                else if (result.Error != null) SetError(result.Error, false);
                 else
                 {
                     operationError = "";
@@ -78,13 +83,14 @@ namespace GamePadRemapper
                         applied = service.TryUpdate(result.Program);
                         if (applied) activeSource = source;
                     }
-                    compileStatus.Text = applied ? "✓ Live changes applied" : String.Equals(activeSource, source, StringComparison.Ordinal) ? "✓ This version is active" : "✓ Valid script · ready to inject";
+                    bool active = !preview && String.Equals(activeSource, source, StringComparison.Ordinal) && service.IsRunning;
+                    compileStatus.Text = applied ? "✓ Live changes applied" : active ? "✓ This version is active" : "✓ Valid script · ready to inject";
                     compileStatus.Foreground = Theme.Mint;
                     if (applied) footer.Text = "Valid edits applied atomically · Ctrl+Enter also applies manually";
                 }
                 if (IsDirty)
                 {
-                    try { draftWrite = Task.Run(() => ScriptStorage.WriteDraft(draftPath, source)); await draftWrite; if (editingDisposed || closing || !IsDirty) DeleteOwnDraft(); }
+                    try { draftWrite = Task.Run(() => ScriptStorage.WriteDraft(draftPath, source)); await draftWrite; if (editingDisposed || closing || document != documentRevision || !IsDirty) DeleteOwnDraft(); }
                     catch (IOException exception) { footer.Text = "Draft recovery unavailable: " + exception.Message; }
                     catch (UnauthorizedAccessException exception) { footer.Text = "Draft recovery unavailable: " + exception.Message; }
                 }
@@ -112,9 +118,19 @@ namespace GamePadRemapper
             catch (UnauthorizedAccessException) { }
         }
 
+        private void DeleteRecoveredDraft()
+        {
+            if (String.IsNullOrEmpty(recoveredDraftPath)) return;
+            try { if (File.Exists(recoveredDraftPath)) File.Delete(recoveredDraftPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            recoveredDraftPath = null;
+            UpdateRecoveryButton();
+        }
+
         private void UpdateRecoveryButton()
         {
-            try { recoverDraft.Visibility = Directory.Exists(recoveryDirectory) && Directory.EnumerateFiles(recoveryDirectory, "*.igc").Any(path => !String.Equals(path, draftPath, StringComparison.OrdinalIgnoreCase)) ? Visibility.Visible : Visibility.Collapsed; }
+            try { recoverDraft.Visibility = Directory.Exists(recoveryDirectory) && Directory.EnumerateFiles(recoveryDirectory, "*.igc").Any(path => !String.Equals(path, draftPath, StringComparison.OrdinalIgnoreCase) && !String.Equals(path, recoveredDraftPath, StringComparison.OrdinalIgnoreCase)) ? Visibility.Visible : Visibility.Collapsed; }
             catch (IOException) { recoverDraft.Visibility = Visibility.Collapsed; }
             catch (UnauthorizedAccessException) { recoverDraft.Visibility = Visibility.Collapsed; }
         }
@@ -124,9 +140,11 @@ namespace GamePadRemapper
             if (busy || !ConfirmDiscard()) return;
             try
             {
-                string path = Directory.EnumerateFiles(recoveryDirectory, "*.igc").Where(candidate => !String.Equals(candidate, draftPath, StringComparison.OrdinalIgnoreCase)).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+                string path = Directory.EnumerateFiles(recoveryDirectory, "*.igc").Where(candidate => !String.Equals(candidate, draftPath, StringComparison.OrdinalIgnoreCase) && !String.Equals(candidate, recoveredDraftPath, StringComparison.OrdinalIgnoreCase)).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
                 if (path == null) { UpdateRecoveryButton(); return; }
                 SetSource(ScriptStorage.Read(path), null, true);
+                recoveredDraftPath = path;
+                UpdateRecoveryButton();
                 ShowCode();
                 footer.Text = "Recovered unsaved draft. Save to choose its file name; the original file was not changed.";
             }
@@ -141,6 +159,16 @@ namespace GamePadRemapper
             if (invalidVisualInputs.Count == 0 && !visualCommitFailed) return true;
             footer.Text = "Correct the highlighted visual field before switching views or applying. Your edit is still here.";
             return false;
+        }
+
+        private void ResetVisualToSource()
+        {
+            invalidVisualInputs.Clear();
+            visualCommitFailed = false;
+            if (visualValidationBlocked) { visualValidationBlocked = false; QueueAutomaticValidation(); }
+            if (!visualMode) return;
+            visualMode = false;
+            ShowVisual();
         }
 
         private void BuildMacroEditors()
@@ -255,6 +283,7 @@ namespace GamePadRemapper
 
         private UIElement BuildConditionEditor(VisualCondition condition, int depth)
         {
+            var document = visualDocument;
             var body = new StackPanel();
             var row = new WrapPanel();
             row.Children.Add(ChoiceField(depth == 0 ? "When" : "Condition", condition.Kind, kind =>
@@ -279,7 +308,7 @@ namespace GamePadRemapper
                 if (condition.Kind == VisualConditionKind.Compare || condition.Kind == VisualConditionKind.AbsoluteCompare)
                 {
                     var compare = new ComboBox { ItemsSource = new[] { ">", ">=", "<", "<=", "==", "!=" }, SelectedItem = condition.Operator };
-                    compare.SelectionChanged += (sender, args) => { condition.Operator = (string)compare.SelectedItem; CommitVisual(false); };
+                    compare.SelectionChanged += (sender, args) => { if (loadingDocument || !ReferenceEquals(document, visualDocument)) return; condition.Operator = (string)compare.SelectedItem; CommitVisual(false); };
                     row.Children.Add(Field("Compare", compare, 76));
                     row.Children.Add(NumberField("Threshold", condition.Value, value => { condition.Value = value; CommitVisual(false); }));
                 }
@@ -290,7 +319,7 @@ namespace GamePadRemapper
             if (condition.Kind == VisualConditionKind.Expression)
             {
                 var expression = new TextBox { Text = condition.Expression ?? "", AcceptsReturn = true, MinHeight = 58, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 8, 0, 0), ToolTip = "IGC expression, e.g. get_ival(SOUTH) && abs(get_ival(RX)) > 50. Use is_available for optional controls." };
-                expression.LostKeyboardFocus += (sender, args) => { condition.Expression = expression.Text.Trim(); CommitVisual(false); };
+                expression.LostKeyboardFocus += (sender, args) => { if (loadingDocument || !ReferenceEquals(document, visualDocument)) return; condition.Expression = expression.Text.Trim(); CommitVisual(false); };
                 body.Children.Add(expression);
             }
             if (group)
@@ -351,11 +380,12 @@ namespace GamePadRemapper
             public override string ToString() { return ChoiceLabel(Value.ToString()); }
         }
 
-        private static UIElement ChoiceField<T>(string label, T selected, Action<T> changed, double width) where T : struct
+        private UIElement ChoiceField<T>(string label, T selected, Action<T> changed, double width) where T : struct
         {
+            var document = visualDocument;
             var items = Enum.GetValues(typeof(T)).Cast<T>().Select(value => new EditorChoice<T> { Value = value }).ToArray();
             var combo = new ComboBox { ItemsSource = items, SelectedItem = items.First(item => EqualityComparer<T>.Default.Equals(item.Value, selected)) };
-            combo.SelectionChanged += (sender, args) => { var item = combo.SelectedItem as EditorChoice<T>; if (item != null) changed(item.Value); };
+            combo.SelectionChanged += (sender, args) => { if (loadingDocument || !ReferenceEquals(document, visualDocument)) return; var item = combo.SelectedItem as EditorChoice<T>; if (item != null) changed(item.Value); };
             return Field(label, combo, width);
         }
 
@@ -469,6 +499,117 @@ namespace GamePadRemapper
             field.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, field, codeTab) { RoutedEvent = Keyboard.LostKeyboardFocusEvent });
             ShowCode();
             return preserved && !visualMode;
+        }
+
+        internal void PrepareStoppedSessionValidation()
+        {
+            activeSource = code.Text;
+            QueueAutomaticValidation();
+        }
+
+        internal void RunEditingRegressionTests(Action<bool, string> require, Action waitForValidation, string directory)
+        {
+            string original = code.Text;
+            try
+            {
+                var document = VisualDocument.Parse("main {}\n");
+                document.Rules.Add(new VisualRule { Kind = VisualRuleKind.Deadzone, Source = "LX", Value = 8 });
+                string valid = document.BuildSource();
+                string file = Path.Combine(directory, "visual-discard.igc");
+                ScriptStorage.Write(file, valid);
+                SetSource(valid, file, false);
+                ShowVisual(); UpdateLayout();
+                var field = Descendants<TextBox>(visualContent).First(box => box.Text == "8");
+                field.Text = "bad-number";
+                RaiseVisualFieldCommit(field);
+                waitForValidation();
+                require(compileStatus.Text.Contains("whole number") && visualValidationBlocked, "Automatic checks preserve invalid visual-field errors instead of applying partial edits");
+                bool prompted = false;
+                confirmDiscardPrompt = message => { prompted = message.Contains("invalid"); return MessageBoxResult.Cancel; };
+                require(!ConfirmDiscard() && prompted && invalidVisualInputs.Contains(field), "Cancelling a discard keeps invalid visual edits available");
+                field.Text = "8"; RaiseVisualFieldCommit(field);
+                waitForValidation();
+                require(compileStatus.Text.Contains("Valid") && !visualValidationBlocked, "Correcting a field to its previous value resumes automatic validation");
+                field.Text = "bad-number"; RaiseVisualFieldCommit(field);
+                confirmDiscardPrompt = message => { prompted = message.Contains("invalid"); return MessageBoxResult.No; };
+                require(ConfirmDiscard() && prompted && invalidVisualInputs.Count == 0 && !visualCommitFailed && code.Text == valid, "Invalid visual edits can be discarded instead of trapping the editor");
+
+                UpdateLayout();
+                field = Descendants<TextBox>(visualContent).First(box => box.Text == "8");
+                field.Text = "bad-number";
+                RaiseVisualFieldCommit(field);
+                confirmDiscardPrompt = message => MessageBoxResult.Yes;
+                require(ConfirmDiscard() && File.ReadAllText(file) == valid && !IsDirty && invalidVisualInputs.Count == 0, "Saving before discard preserves the valid script and drops invalid fields");
+
+                UpdateLayout();
+                var staleField = Descendants<TextBox>(visualContent).First(box => box.Text == "8");
+                staleField.Text = "bad-number"; RaiseVisualFieldCommit(staleField);
+                var next = VisualDocument.Parse("// Another document\nmain {}\n");
+                next.Rules.Add(new VisualRule { Kind = VisualRuleKind.Invert, Source = "RY" });
+                string replacement = next.BuildSource();
+                SetSource(replacement, Path.Combine(directory, "replacement.igc"), false);
+                staleField.Text = "25"; RaiseVisualFieldCommit(staleField);
+                require(code.Text == replacement && visualDocument.Rules.Count == 1 && visualDocument.Rules[0].Source == "RY" && invalidVisualInputs.Count == 0, "Replacing a document detaches stale visual fields from the new script");
+
+                ShowCode();
+                string before = code.Text;
+                SetBusy(true);
+                try
+                {
+                    code.Select(0, 0);
+                    EditorKeyDown(code, new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(this), 0, Key.Tab));
+                    require(code.Text == before, "Tab cannot edit the code while compilation or injection makes it read only");
+                }
+                finally { SetBusy(false); }
+
+                var device = new ServiceDevice { Key = 123, Family = 3, Name = "Offline test controller", Token = "offline-test" };
+                device.Available[32] = device.Available[96] = true;
+                RefreshControllers(new[] { device }, true);
+                var card = controllerCards[123];
+                device.Values[96] = 30; device.OutputValues[96] = 60;
+                device.Available[97] = true; device.Diagnostic = "Updated diagnostic";
+                RefreshControllers(new[] { device }, true);
+                require(ReferenceEquals(card, controllerCards[123]) && card.Values.Text.Contains("AXIS_1 30 → 60") && card.Details.Text.Contains("3 controls") && card.Diagnostic.Text == device.Diagnostic, "Live monitor reuses its controller card while values and diagnostics change");
+                for (int index = 32; index < 96; ++index) device.Available[index] = true;
+                device.Available[159] = true; device.Values[159] = device.OutputValues[159] = -40;
+                require(FormatControllerValues(device).Contains("AXIS_64 -40"), "Active controls stay visible behind many idle HID buttons");
+                RefreshControllers(new ServiceDevice[0], false);
+                require(controllerCards.Count == 0 && renderedDeviceKeys.Length == 0 && devices.Children.Count == 1, "Disconnected controller cards are released");
+
+                SetSource("main {}\n", Path.Combine(directory, "clean.igc"), false);
+                string recoverable = Path.Combine(recoveryDirectory, Guid.NewGuid().ToString("N") + ".igc");
+                ScriptStorage.WriteDraft(recoverable, valid);
+                UpdateRecoveryButton();
+                require(recoverDraft.Visibility == Visibility.Visible, "An unsaved draft is discoverable without changing any script");
+                RecoverLatestDraft();
+                require(code.Text == valid && IsDirty && recoveredDraftPath == recoverable, "Recovering a draft opens it as unsaved text");
+                currentPath = Path.Combine(directory, "recovered.igc");
+                require(SaveScript(false) && !File.Exists(recoverable) && File.ReadAllText(currentPath) == valid, "Saving a recovered draft retires that recovery file");
+
+                string bad = Path.Combine(libraryDirectory, "invalid-encoding.igc");
+                File.WriteAllBytes(bad, new byte[] { 0x6d, 0x61, 0x69, 0x6e, 0x20, 0xc3, 0x28 });
+                string saved = currentPath, source = code.Text;
+                LoadLibrary();
+                library.SelectedItem = library.Items.Cast<ListBoxItem>().First(item => String.Equals(item.Tag as string, bad, StringComparison.OrdinalIgnoreCase));
+                require(currentPath == saved && code.Text == source && String.Equals(((ListBoxItem)library.SelectedItem).Tag as string, saved, StringComparison.OrdinalIgnoreCase), "A file that cannot be decoded leaves the previous script and library selection intact");
+                bool rejected = false;
+                try { ScriptStorage.Write(saved, "main {}\n// " + new string((char)0xd800, 1)); }
+                catch (IOException) { rejected = true; }
+                require(rejected && File.ReadAllText(saved) == source, "Invalid Unicode cannot silently replace a saved script");
+                File.Delete(bad);
+            }
+            finally
+            {
+                confirmDiscardPrompt = null;
+                invalidVisualInputs.Clear(); visualCommitFailed = false;
+                SetSource(original, null, true);
+                ShowCode(); ResetPreview();
+            }
+        }
+
+        private void RaiseVisualFieldCommit(TextBox field)
+        {
+            field.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, field, codeTab) { RoutedEvent = Keyboard.LostKeyboardFocusEvent });
         }
     }
 

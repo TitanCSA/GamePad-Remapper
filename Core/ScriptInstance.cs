@@ -43,10 +43,11 @@ namespace GamePadRemapper.Core
         internal readonly long[] Offset = new long[256];
         internal readonly int[] Lower = new int[256], Upper = new int[256];
         internal readonly bool[] HasHeld = new bool[256];
-        internal bool Running; internal long Deadline;
+        internal bool Running; internal long Deadline; internal int Generation;
         internal ComboState(int localCapacity) { Vm = new VmState(localCapacity); }
-        internal void Clear() { Running = false; Deadline = 0; Array.Clear(HasHeld, 0, 256); }
+        internal void Clear() { Running = false; Deadline = 0; Generation = unchecked(Generation + 1); Array.Clear(HasHeld, 0, 256); }
     }
+    internal enum RunOutcome { Completed, Waiting, Replaced, Cancelled }
     public sealed class ScriptInstance
     {
         private readonly ScriptProgram program;
@@ -60,9 +61,10 @@ namespace GamePadRemapper.Core
         private readonly bool[] hasPvar = new bool[64];
         private readonly bool[] pressed = new bool[256], released = new bool[256];
         private readonly bool[] previousAvailable = new bool[256];
+        private readonly int[] comboBase = new int[256];
         private readonly VmState main;
         private readonly ComboState[] combos;
-        private ControlFrame frame; private ComboState currentCombo; private Instruction currentInstruction;
+        private ControlFrame frame; private ComboState currentCombo; private Instruction currentInstruction; private int currentComboIndex = -1;
         private long now, startTime, previousTime; private int elapsed, remaining, busy, tickMilliseconds = 1, activeTickMilliseconds;
         private uint randomState = 0xA341316Cu; private bool initialized, timeAware, forcedTicks;
         public int NextWakeMilliseconds { get; private set; }
@@ -97,10 +99,11 @@ namespace GamePadRemapper.Core
             if (input == null) throw new ArgumentNullException("input");
             if (nowMicroseconds < 0) throw new ArgumentOutOfRangeException("nowMicroseconds");
             if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) throw new InvalidOperationException("A script instance belongs to a single device worker.");
-            frame = input; frame.CopyPhysicalToOutput();
+            frame = input; frame.CopyPhysicalToOutput(); bool acceptedTime = false;
             try
             {
                 if (initialized && nowMicroseconds < previousTime) throw new ScriptException("Monotonic time moved backwards.");
+                acceptedTime = true;
                 now = nowMicroseconds; elapsed = Math.Max(0, elapsedMilliseconds); remaining = instructionBudget; NextWakeMilliseconds = activeTickMilliseconds = 0; timeAware = false;
                 if (!initialized) { startTime = now; for (int i = 0; i < 256; i++) changedAt[i] = lastReleasedAt[i] = now; }
                 for (int i = 0; i < 256; i++)
@@ -131,8 +134,14 @@ namespace GamePadRemapper.Core
                     bool ran = false;
                     if (combo.Deadline <= now)
                     {
-                        Array.Clear(combo.HasHeld, 0, 256); currentCombo = combo;
-                        if (!Run(combo.Vm)) combo.Clear(); currentCombo = null; ran = true;
+                        Array.Copy(frame.Values, comboBase, 256); RunOutcome outcome;
+                        do
+                        {
+                            Array.Clear(combo.HasHeld, 0, 256); currentCombo = combo; currentComboIndex = c;
+                            outcome = Run(combo.Vm); currentCombo = null; currentComboIndex = -1;
+                            if (outcome == RunOutcome.Cancelled || outcome == RunOutcome.Replaced) Array.Copy(comboBase, frame.Values, 256);
+                        } while (outcome == RunOutcome.Replaced);
+                        if (outcome == RunOutcome.Completed) combo.Clear(); ran = true;
                     }
                     if (combo.Running)
                     {
@@ -155,7 +164,8 @@ namespace GamePadRemapper.Core
             }
             finally
             {
-                Array.Copy(frame.Physical, previous, 256); Array.Copy(frame.Available, previousAvailable, 256); previousTime = nowMicroseconds; currentCombo = null; frame = null; Volatile.Write(ref busy, 0);
+                if (acceptedTime) { Array.Copy(frame.Physical, previous, 256); Array.Copy(frame.Available, previousAvailable, 256); previousTime = nowMicroseconds; }
+                currentCombo = null; currentComboIndex = -1; frame = null; Volatile.Write(ref busy, 0);
             }
         }
         private static int Neutral(int index) { return index >= 192 && index < 208 ? -1 : 0; }
@@ -168,8 +178,9 @@ namespace GamePadRemapper.Core
         private void Error(string message) { throw new ScriptException(message, currentInstruction.Line, currentInstruction.Column); }
         private void Push(VmState state, int value) { if (state.Sp >= state.Stack.Length) Error("Expression stack exceeds 1,024 values."); state.Stack[state.Sp++] = value; }
         private int Pop(VmState state) { if (state.Sp <= 0) Error("Invalid compiled expression stack."); return state.Stack[--state.Sp]; }
-        private bool Run(VmState state)
+        private RunOutcome Run(VmState state)
         {
+            int generation = currentCombo == null ? 0 : currentCombo.Generation;
             while (true)
             {
                 if (--remaining < 0) Error("Script instruction budget exceeded. Check loops and recursion; output was restored to physical input.");
@@ -205,7 +216,11 @@ namespace GamePadRemapper.Core
                     case Op.Builtin:
                     {
                         int start = state.Sp - instruction.B; if (start < 0) Error("Invalid compiled argument stack.");
-                        int result = Invoke(instruction.A, state.Stack, start, instruction.B); state.Sp = start; Push(state, result); break;
+                        int result = Invoke(instruction.A, state.Stack, start, instruction.B);
+                        // A combo can stop or restart itself from a function. Its
+                        // previous VM continuation must never touch the new stack.
+                        if (currentCombo != null && currentCombo.Generation != generation) return currentCombo.Running ? RunOutcome.Replaced : RunOutcome.Cancelled;
+                        state.Sp = start; Push(state, result); break;
                     }
                     case Op.Call:
                     {
@@ -218,14 +233,14 @@ namespace GamePadRemapper.Core
                     }
                     case Op.Return:
                     {
-                        int result = Pop(state); if (state.Depth == 0) return false;
+                        int result = Pop(state); if (state.Depth == 0) return RunOutcome.Completed;
                         ReturnPoint back = state.Calls[--state.Depth]; state.Block = back.Block; state.Pc = back.Pc; state.LocalBase = back.LocalBase; state.LocalTop = back.LocalTop; state.Sp = back.Stack; Push(state, result); break;
                     }
                     case Op.Wait:
                     {
                         int duration = Pop(state); if (duration < 0 || duration > 86400000) Error("wait duration must be between 0 and 86,400,000 ms.");
                         if (currentCombo == null || state.Depth != 0) Error("wait is only valid directly inside a combo.");
-                        currentCombo.Deadline = SafeDeadline(Math.Max(1, duration)); return true;
+                        currentCombo.Deadline = SafeDeadline(Math.Max(1, duration)); return RunOutcome.Waiting;
                     }
                     default:
                     {
@@ -307,7 +322,7 @@ namespace GamePadRemapper.Core
                 case 8:
                     a = Control(a); if (b < 0 || b > 86400000) Error("block duration must be between 0 and 86,400,000 ms.");
                     blockedUntil[a] = b == 0 ? now : SafeDeadline(b); if (b != 0) Set(a, Neutral(a)); return 0;
-                case 9: a = Control(a); b = Control(b); int old = frame.Values[a]; Set(a, frame.Values[b]); Set(b, old); return 0;
+                case 9: a = Control(a); b = Control(b); if (frame.Available[a] && frame.Available[b]) { int old = frame.Values[a]; Set(a, frame.Values[b]); Set(b, old); } return 0;
                 case 10: return SafeAbs(a);
                 case 11: return Math.Min(a, b);
                 case 12: return Math.Max(a, b);
@@ -328,10 +343,22 @@ namespace GamePadRemapper.Core
                 case 17: case 19:
                     int comboId = Combo(a); var combo = combos[comboId];
                     if (id == 19 || !combo.Running) { combo.Clear(); combo.Running = true; combo.Vm.Start(program.ComboBlocks[comboId], program.Blocks[program.ComboBlocks[comboId]]); combo.Deadline = now; } return 0;
-                case 18: combos[Combo(a)].Clear(); return 0;
+                case 18:
+                    a = Combo(a);
+                    // An earlier combo may already have contributed to this
+                    // pass. One cleanup evaluation releases it even if physical
+                    // reports stop immediately after this cancellation.
+                    if (currentCombo != null && a < currentComboIndex && combos[a].Running) Schedule(SafeDeadline(1));
+                    combos[a].Clear(); return 0;
                 case 20: return combos[Combo(a)].Running ? 1 : 0;
-                case 21: foreach (var running in combos) running.Clear(); return 0;
-                case 22: a = Control(a); b = Control(b); if (a != b) { Set(b, frame.Physical[a]); Set(a, Neutral(a)); } return 0;
+                case 21:
+                    for (int index = 0; index < combos.Length; index++)
+                    {
+                        if (currentCombo != null && index < currentComboIndex && combos[index].Running) Schedule(SafeDeadline(1));
+                        combos[index].Clear();
+                    }
+                    return 0;
+                case 22: a = Control(a); b = Control(b); if (a != b && frame.Available[a] && frame.Available[b]) { Set(b, frame.Physical[a]); Set(a, Neutral(a)); } return 0;
                 case 23: a = Control(a); Set(a, -(long)frame.Values[a]); return 0;
                 case 24: return frame.Available[Control(a)] ? 1 : 0;
                 case 25: return unchecked((int)frame.Family);

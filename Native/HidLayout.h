@@ -44,7 +44,7 @@ inline bool SeedHidLayout(HidSlots& slots,const std::vector<std::uint8_t>& descr
             else if(cap.UsagePage==1&&usage>=0x30&&usage<=0x38)kind=1;
             else if(cap.UsagePage==1&&usage==0x39)kind=3;
             const std::int64_t minimum=cap.LogicalMin,maximum=cap.LogicalMin<0?static_cast<std::int64_t>(cap.LogicalMax):static_cast<std::uint32_t>(cap.LogicalMax);
-            if((kind==1||kind==2)&&(!cap.IsAbsolute||maximum<=minimum))kind=4;
+            if((kind>=1&&kind<=3&&!cap.IsAbsolute)||((kind==1||kind==2)&&maximum<=minimum))kind=4;
             const unsigned elements=cap.IsRange?1u:cap.ReportCount;
             if(fields.size()+elements>65536)return false;
             for(unsigned element=0;element<elements;++element)fields.push_back({cap.UsagePage,static_cast<USHORT>(usage),cap.LinkCollection,index,element,cap.ReportID,static_cast<std::uint8_t>(kind)});

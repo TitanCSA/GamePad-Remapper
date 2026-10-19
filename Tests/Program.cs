@@ -108,6 +108,24 @@ internal static class Program
                 var instance = ScriptCompiler.Compile("main { if(event_press(SOUTH)) combo_run(Tap); if(event_press(WEST)) combo_restart(Tap); if(event_press(NORTH)) combo_stop(Tap);set_val(VALUE_1,combo_running(Tap));} combo Tap {set_val(EAST,100);wait(50);}").CreateInstance(); var frame = Frame(); frame.Physical[10] = 100;
                 instance.Execute(frame, 0, 0); Check(frame.Values[11] == 100 && frame.Values[208] == 1, "combo running"); frame.Physical[12] = 100; instance.Execute(frame, 20000, 20); Check(instance.NextWakeMilliseconds == 50, "restart extends"); frame.Physical[13] = 100; instance.Execute(frame, 30000, 10); Check(frame.Values[11] == 0 && instance.NextWakeMilliseconds == 0, "stop releases");
             });
+            Test("self-stopping combos halt and release the cancelled segment", () =>
+            {
+                var engine = ScriptCompiler.Compile("main{if(event_press(SOUTH))combo_run(Self);}combo Self{set_val(LX,70);cancel();set_val(LX,99);wait(10);}function cancel(){combo_stop(Self);set_val(LY,99);}").CreateInstance(); var frame = Frame(); frame.Physical[0] = 10; frame.Physical[1] = -20; frame.Physical[10] = 100;
+                engine.Execute(frame, 0, 0); Check(frame.Values[0] == 10 && frame.Values[1] == -20 && engine.NextWakeMilliseconds == 0, "nested-function self-stop aborts old continuation and releases its writes");
+                engine = ScriptCompiler.Compile("main{if(event_press(SOUTH))combo_run(Self);}combo Self{set_val(EAST,100);wait(10);combo_stop_all();set_val(LX,99);wait(10);}").CreateInstance(); engine.Execute(frame, 0, 0); Check(frame.Values[11] == 100, "combo begins before stop-all segment"); engine.Execute(frame, 10000, 10); Check(frame.Values[0] == 10 && frame.Values[11] == 0 && engine.NextWakeMilliseconds == 0, "self stop-all cannot leave an unscheduled output behind");
+            });
+            Test("self-restarting combos keep a bounded expression stack", () =>
+            {
+                var engine = ScriptCompiler.Compile("main{if(event_press(SOUTH))combo_run(Self);}combo Self{set_val(EAST,100);wait(1);restart();set_val(LX,99);}function restart(){set_val(LY,combo_restart(Self));}").CreateInstance(); var frame = Frame(); frame.Physical[0] = 10; frame.Physical[1] = -20; frame.Physical[10] = 100;
+                for (int round = 0; round < 3000; round++) { engine.Execute(frame, round * 1000L, round == 0 ? 0 : 1); Check(frame.Values[0] == 10 && frame.Values[1] == -20 && frame.Values[11] == 100 && engine.NextWakeMilliseconds == 1, "self-restart abandons the previous function and pending expression " + round); }
+                RuntimeError("main{combo_run(Self);}combo Self{combo_restart(Self);}", "budget");
+            });
+            Test("cross-combo cancellation schedules final quiet-input cleanup", () =>
+            {
+                var engine = ScriptCompiler.Compile("main{if(event_press(SOUTH)){combo_run(First);combo_run(Second);}}combo First{set_val(EAST,100);wait(100);}combo Second{wait(10);combo_stop(First);}").CreateInstance(); var frame = Frame(); frame.Physical[10] = 100;
+                engine.Execute(frame, 0, 0); Check(frame.Values[11] == 100, "earlier held action begins"); engine.Execute(frame, 10000, 10); Check(engine.NextWakeMilliseconds == 1, "cancelling an already-applied earlier combo requests one cleanup"); engine.Execute(frame, 11000, 1); Check(frame.Values[11] == 0 && engine.NextWakeMilliseconds == 0, "cleanup releases held output and returns to idle without a physical report");
+                engine = ScriptCompiler.Compile("main{if(event_press(SOUTH)){combo_run(First);combo_run(Second);}}combo First{set_val(EAST,100);wait(100);}combo Second{wait(10);combo_stop_all();set_val(LX,99);}").CreateInstance(); engine.Execute(frame, 0, 0); engine.Execute(frame, 10000, 10); Check(engine.NextWakeMilliseconds == 1 && frame.Values[0] == 0, "stop-all cancels its own continuation and schedules earlier-output cleanup"); engine.Execute(frame, 11000, 1); Check(frame.Values[11] == 0 && engine.NextWakeMilliseconds == 0, "stop-all cleanup restores physical state");
+            });
             Test("combo loops and function calls", () =>
             {
                 var engine = ScriptCompiler.Compile("main {if(event_press(SOUTH)) combo_run(Sequence);} function output(n){set_val(EAST,n);} combo Sequence {int i;for(i=1;i<=3;i++){output(i*20);wait(5);}}").CreateInstance(); var frame = Frame(); frame.Physical[10] = 100;
@@ -238,12 +256,43 @@ internal static class Program
                 frame.Physical[32] = frame.Physical[33] = 100; frame.Physical[98] = 80; frame.Physical[96] = 10; frame.Physical[97] = -20; engine.Execute(frame, 0, 0); engine.Execute(frame, 400000, 400);
                 Check(frame.Values[96] == 35 && frame.Values[97] == -20 && engine.NextWakeMilliseconds == 4, "generic descriptor axes receive additive orbit"); frame.Available[98] = false; engine.Execute(frame, 401000, 1); Check(frame.Values[96] == 10 && frame.Values[97] == -20 && engine.NextWakeMilliseconds == 0, "missing camera control releases orbit");
             });
+            Test("missing remap and swap endpoints preserve available inputs", () =>
+            {
+                var frame = Frame(); frame.Physical[10] = 100; frame.Physical[21] = 77; frame.Available[21] = false;
+                var engine = ScriptCompiler.Compile("main{remap(SOUTH,TOUCH);}").CreateInstance(); engine.Execute(frame, 0, 0); Check(frame.Values[10] == 100 && frame.Values[21] == 77, "missing remap target cannot swallow a real source");
+                engine = ScriptCompiler.Compile("main{remap(TOUCH,SOUTH);}").CreateInstance(); engine.Execute(frame, 0, 0); Check(frame.Values[10] == 100, "stale unavailable source cannot overwrite an available target");
+                engine = ScriptCompiler.Compile("main{swap(SOUTH,TOUCH);}").CreateInstance(); engine.Execute(frame, 0, 0); Check(frame.Values[10] == 100 && frame.Values[21] == 77, "swap needs both controls");
+                frame.Available[21] = true; engine.Execute(frame, 1000, 1); Check(frame.Values[10] == 77 && frame.Values[21] == 100, "swap works once both endpoints are available");
+            });
             Test("compiler rejects unsafe and malformed programs", () =>
             {
                 string[] invalid = { "", "main {", "main {} main{}", "main{wait(5);}", "main{break;}", "main{continue;}", "int a[0];main{}", "main{unknown=3;}", "main{set_val(SOUTH);}", "main{system(1);}", "main{get_val(\"SOUTH\");}", "main{int a; a[0]=1;}", "int a[3];main{a=1;}", "const int a[]={1};main{a[0]=2;}", "function f(a,a){} main{}", "define Z=1/0;main{}", "main{int a=1;int a=2;}", "int a[];main{}", "main{/*" };
                 foreach (string source in invalid) CompileError(source);
                 CompileError("main {set_val(VALUE_1," + new string('(', 150) + "1" + new string(')', 150) + ");}", "nesting");
                 var expression = new StringBuilder("main {set_val(VALUE_1,1"); for (int i = 0; i < 2000; i++) expression.Append("+1"); expression.Append(");}"); CompileError(expression.ToString(), "nesting");
+            });
+            Test("compiler distinguishes real entry blocks reserved words and array sizes", () =>
+            {
+                foreach (string keyword in new[] { "define", "const", "int", "main", "init", "combo", "function", "if", "else", "while", "for", "break", "continue", "return", "wait" })
+                {
+                    CompileError("int " + keyword + ";main{}", "reserved"); CompileError("function " + keyword + "(){}main{}", "reserved"); CompileError("function f(" + keyword + "){}main{}", keyword == "int" ? null : "reserved");
+                }
+                CompileError("combo main{wait(1);}", "reserved"); CompileError("combo init{wait(1);}main{}", "reserved"); CompileError("int a[-1]={1};main{}", "Array length"); CompileError("main{int a[-1]={1};}", "Array length");
+                var frame = Run("int a[]={3,5};main{int b[]={7,11};set_val(VALUE_1,a[1]+b[1]);}"); Check(frame.Values[208] == 16, "genuine omitted array lengths are inferred");
+                var maximum = new StringBuilder("main{}"); for (int index = 0; index < 94; index++) maximum.Append("function f").Append(index).Append("(){}"); ScriptCompiler.Compile(maximum.ToString()); Check(true, "94 helpers plus main and implicit init fit 96 blocks"); maximum.Append("function overflow(){}"); CompileError(maximum.ToString(), "At most 96");
+                CompileError("main{}combo T{set_val(LX,wait(5));}", "standalone"); CompileError("main{}combo T{int value=wait(5);}", "standalone"); CompileError("main{}combo T{if(wait(5))set_val(LX,10);}", "standalone"); CompileError("main{}combo T{wait(wait(5));}", "standalone");
+                CompileError("main{}combo T{for(wait(5);0;){};}", "standalone");
+                ScriptCompiler.Compile("main{combo_run(T);}combo T{if(1)wait(5);for(int i=0;i<2;i++){wait(1);}}"); Check(true, "standalone waits remain valid within combo loops and branches");
+            });
+            Test("rejected monotonic timestamps do not consume time or input history", () =>
+            {
+                var engine = ScriptCompiler.Compile("main{set_val(VALUE_1,event_press(SOUTH));set_val(VALUE_2,get_runtime());}").CreateInstance(); var frame = Frame(); engine.Execute(frame, 1000, 0); frame.Physical[10] = 100;
+                foreach (long timestamp in new[] { 500L, 750L, 999L })
+                {
+                    try { engine.Execute(frame, timestamp, 0); throw new Exception("retrograde timestamp accepted"); } catch (ScriptException error) { Check(error.Message.Contains("backwards"), "each backward timestamp remains rejected"); }
+                    Check(frame.Values[10] == 100 && engine.NextWakeMilliseconds == 0, "rejection remains fail-open");
+                }
+                engine.Execute(frame, 1001, 0); Check(frame.Values[208] == 1 && frame.Values[209] == 0, "first valid frame retains its real press edge and nonnegative elapsed time"); engine.Execute(frame, 2000, 1); Check(frame.Values[208] == 0 && frame.Values[209] == 1, "normal history resumes after rejection");
             });
             Test("runtime safety and fail-open output", () =>
             {

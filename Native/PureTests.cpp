@@ -69,8 +69,29 @@ void HidIdentities() {
     output=physical;output[208]=-9000;rawSlots.Write(relative,physical,output);
     Check(relative.state.axes[0].value==-9000,"Raw relative axes retain full signed integer editing");
 }
+void RelativeReports() {
+    Remapper::HidSlots slots;Interceptor::Hid_Decoded_Input actual;
+    Interceptor::Hid_Value dial;dial.relative=true;dial.bit_size=16;dial.minimum=-32768;dial.maximum=32767;
+    dial.usage_page=1;dial.usage=0x37;dial.value=17;actual.state.axes.push_back(dial);
+    auto hat=dial;hat.usage=0x39;hat.data_index=1;hat.value=-3;actual.state.hats.push_back(hat);
+    Interceptor::Hid_Button button;button.usage_page=9;button.usage=1;actual.state.buttons.push_back(button);
+    std::array<int,256> physical{},output{};std::array<std::uint8_t,256> available{};
+    slots.Read(actual,physical,available);
+    Check(physical[208]==17&&physical[209]==-3&&!available[192],"Every relative scalar, including a relative hat, retains its raw delta");
+    auto synthetic=actual;std::vector<unsigned> relative;slots.PrepareSynthetic(synthetic,relative);
+    Check(relative.size()==2&&synthetic.state.axes[0].value==0&&synthetic.state.hats[0].value==0,"Synthetic templates neutralize previous relative movements");
+    Check(actual.state.axes[0].value==17&&actual.state.hats[0].value==-3,"Neutralizing a template cannot alter the original physical packet");
+    Remapper::ClearRelative(physical,relative);output=physical;output[32]=100;
+    slots.Write(synthetic,physical,output);
+    Check(synthetic.state.buttons[0].pressed&&synthetic.state.axes[0].value==0&&synthetic.state.hats[0].value==0,"An unrelated timed button press does not replay either previous delta");
+    for(int i=0;i<1000;++i) {
+        synthetic=actual;slots.PrepareSynthetic(synthetic,relative);output=physical;output[209]=-1000+i;
+        slots.Write(synthetic,physical,output);
+        Check(synthetic.state.hats[0].value==-1000+i&&synthetic.state.axes[0].value==0,"Explicit relative output uses raw units without hat-direction conversion");
+    }
+}
 }
 int main() {
-    try{NativeExactness();HidIdentities();std::printf("Native pure checks passed: %u; no driver access\n",checks);return 0;}
+    try{NativeExactness();HidIdentities();RelativeReports();std::printf("Native pure checks passed: %u; no driver access\n",checks);return 0;}
     catch(const std::exception& error){std::fprintf(stderr,"Native check failed after %u: %s\n",checks,error.what());return 1;}
 }

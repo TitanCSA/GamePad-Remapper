@@ -156,6 +156,7 @@ namespace GamePadRemapper
             {
                 if (started) { GR_Stop(); started = false; }
                 instances.Clear(); executing = null;
+                Interlocked.Exchange(ref pending, null);
             }
         }
 

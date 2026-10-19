@@ -15,8 +15,8 @@ using GamePadRemapper.Core;
 [assembly: System.Reflection.AssemblyDescription("IGC controller scripts, visual remapping and macros for Interceptor Gamepad Controller")]
 [assembly: System.Reflection.AssemblyCompany("TitanCSA")]
 [assembly: System.Reflection.AssemblyProduct("GamePad Remapper")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
 
 namespace GamePadRemapper
 {
@@ -178,6 +178,10 @@ namespace GamePadRemapper
                 window.Source += "\n// edited\n";
                 Require(window.IsDirty, "Editing marks the script unsaved", checks);
                 Require(window.DiagnosticText.Contains("SIMULATED") || window.DiagnosticText.Contains("Last operation"), "Test interface never captures hardware", checks);
+                window.RunEditingRegressionTests((condition, name) => Require(condition, name, checks), () => WaitForValidation(window), temporary);
+                window.PrepareStoppedSessionValidation();
+                WaitForValidation(window);
+                Require(!window.CaptureRunning && !window.CompilationMessage.Contains("is active"), "A stopped session is never labelled as an active script", checks);
                 if (renderDirectory != null)
                 {
                     Directory.CreateDirectory(renderDirectory);

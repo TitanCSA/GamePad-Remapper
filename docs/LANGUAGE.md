@@ -14,7 +14,7 @@ The application compiles each `.igc` file once to immutable bytecode. Each inter
 - Integer overflow wraps in two's complement; division truncates toward zero. Shift counts use their low five bits. A zero divisor, invalid array index or invalid function argument faults the script.
 - Decimal and hexadecimal literals; `// line` and `/* block */` comments. Strings, dynamic allocation, classes, pointers, imports, GPC `data(...)` and hardware-specific declarations are unavailable.
 
-Lowercase variable names such as `a`, `x` and `y` are valid. Control constants are uppercase. `TRUE`/`FALSE` and `true`/`false` are available.
+Lowercase variable names such as `a`, `x` and `y` are valid. Control constants are uppercase. `TRUE`/`FALSE` and `true`/`false` are available. Language keywords and builtin names cannot be redeclared. `main` and `init` must be actual entry blocks, not function or combo names. Array lengths must be positive; only omitted `[]` lengths are inferred from an initializer.
 
 ## Controls
 
@@ -25,6 +25,8 @@ For generic HID controllers, **descriptor identities are authoritative**: `BUTTO
 Unavailable controls read as neutral (`-1` for hats, `0` otherwise) and cannot generate phantom press edges. A newly available, physically pressed control generates one real press edge.
 
 Axis values use `-100..100`, triggers `0..100`, buttons `0/100`, and hats `-1` (neutral) or `0..7`. Generic value fields and relative or non-normalizable scalar axes use raw `VALUE_n` slots within the language's signed 32-bit range; larger unsigned values are clipped in the script view. Writes to normalized controls clamp to their respective range; the native HID encoder additionally honors descriptor bounds. Percent rounding can lose sub-percent precision for a modified axis. Unchanged fields preserve the original report bytes.
+
+Decoded relative scalars represent movement in the current physical report, not a held position. They return to zero for timer work and unrelated reports; synthetic templates neutralize those previous deltas so an unrelated timed button press does not replay movement. Explicit raw `VALUE_n` writes can generate new relative movement in their owning report. Unknown bytes and wide binary fields remain outside this scalar behavior; no vendor-specific interpretation is invented.
 
 ## Builtins
 
@@ -43,8 +45,8 @@ Axis values use `-100..100`, triggers `0..100`, buttons `0/100`, and hats `-1` (
 | `get_phase(periodMs)` | Monotonic elapsed milliseconds modulo `periodMs`, in `0..periodMs-1`. Period `1..86,400,000 ms`; the 64-bit clock is reduced before conversion to `int`. |
 | `is_available(control)` | Whether this report/device exposes that control. |
 | `get_controller()`, `get_device()` | Native family ID or current capture-local device key. |
-| `remap(source, target)` | Copy physical source to target and neutralize source. |
-| `swap(first, second)` | Exchange current output values. |
+| `remap(source, target)` | Copy physical source to target and neutralize source. Does nothing unless both controls are available, so a missing target cannot consume an existing button. |
+| `swap(first, second)` | Exchange current output values when both controls are available; otherwise leave them unchanged. |
 | `invert(control)` | Negate the current value; useful for signed axes. |
 | `block(control, milliseconds)` | Neutralize until the monotonic deadline. Calling again restarts the deadline; `0` cancels. |
 | `deadzone(control, threshold[, secondControl])` | Scalar rescaled inner deadzone, threshold `0..99`; optionally apply the same threshold to another axis. This is not GPC's radial/multi-argument deadzone API. |
@@ -61,7 +63,7 @@ Axis values use `-100..100`, triggers `0..100`, buttons `0/100`, and hats `-1` (
 | `combo_run(name)` | Start an idle combo; leave a running combo alone. |
 | `combo_restart(name)`, `combo_stop(name)` | Restart from the beginning, or stop and release held outputs. |
 | `combo_running(name)`, `combo_stop_all()` | Query running state, or stop all combos. |
-| `wait(milliseconds)` | Yield a combo without blocking the worker. Valid only directly inside a combo; `0` schedules at least one millisecond. |
+| `wait(milliseconds)` | Yield a combo without blocking the worker. Must be a standalone statement directly inside a combo, including its loops/branches; not an argument, assignment or condition. `0` schedules at least one millisecond. |
 | `tick(milliseconds)` | Request another evaluation at `1..20 ms` on this executed path. Call again while the behavior remains active. Multiple calls select the smallest interval; earlier combo/block deadlines still win. Overrides the default clock-function cadence for this pass. Returns `0`. |
 | `vm_tctrl(milliseconds)` | Legacy persistent `1..20 ms` cadence; default clock-function cadence is `1 ms`. Once called, periodic work continues even if the original branch later becomes inactive. Prefer scoped `tick` for conditional motion. |
 
@@ -70,6 +72,8 @@ Axis values use `-100..100`, triggers `0..100`, buttons `0/100`, and hats `-1` (
 Each execution starts from the newest physical state, runs main, applies active blocks, then applies combos in declaration order. `set_val` replaces the value at that point; `add_val` adds to it. Later combos compose with or replace earlier output according to their actions.
 
 During a combo's `wait`, absolute assignments stay held, while additions are reapplied to the current output from main and earlier combos. A physical `LX` of `10` plus a held offset of `20` produces `30`; moving physical `LX` to `30` produces `50`. It does not accumulate another `20` on every timer tick. Intermediate clipping is preserved: starting at `80`, `add_val(LX,80)` then `add_val(LX,-80)` produces `20`, including during the hold. At the next segment, held actions are released unless assigned again. Completion, Stop, reinjection, capture failure and script fault restore physical forwarding.
+
+Stopping the currently executing combo, including from a called function or `combo_stop_all`, immediately abandons that combo's continuation and cancels its current segment's writes. Restarting itself abandons the old expression/call stack and starts the new combo within the same shared instruction budget; an endless immediate-restart loop faults instead of overflowing a stack. If a later combo stops an earlier combo whose output was already applied in this pass, a one-shot cleanup evaluation is requested after `1 ms`, even without another physical report. Windows scheduling still affects the actual delivery time.
 
 Timers use the host's supplied monotonic microsecond clock. They are deadlines, not busy waits. Scheduling, Windows load, hardware report cadence, and the driver determine when the next update reaches an application. Zero latency is not possible or claimed.
 
