@@ -1,0 +1,11 @@
+// Percent values: sticks -100..100, triggers 0..100, buttons 0 or 100.
+define DEADZONE = 8;
+define SENSITIVITY = 80;
+
+main {
+    deadzone(LX, DEADZONE);
+    deadzone(LY, DEADZONE);
+    sensitivity(RX, SENSITIVITY);
+    sensitivity(RY, SENSITIVITY);
+    invert(LY);
+}

@@ -1,0 +1,12 @@
+// Original IGC supports bounded loops, arrays and functions.
+// The table is immutable; globals persist for this device until Stop or reinjection.
+const int curve[] = { 0, 5, 15, 30, 50, 75, 100 };
+
+main {
+    if (is_available(RT)) set_val(RT, stepped(get_ival(RT)));
+}
+
+function stepped(value) {
+    int index = clamp(value * 6 / 100, 0, 6);
+    return curve[index];
+}

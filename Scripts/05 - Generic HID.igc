@@ -1,0 +1,7 @@
+// Generic HID fields are exposed by their descriptor order, not guessed button labels.
+// Inspect the live monitor first: AXIS_1..64, BUTTON_1..64,
+// TRIGGER_1..32, HAT_1..16 and VALUE_1..48.
+main {
+    if (is_available(BUTTON_1) && is_available(BUTTON_2)) remap(BUTTON_1, BUTTON_2);
+    if (is_available(AXIS_2)) invert(AXIS_2);
+}

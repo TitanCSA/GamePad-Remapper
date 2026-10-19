@@ -1,0 +1,5 @@
+// Remap a native gamepad's South button (A / Cross) to East (B / Circle).
+// For generic HID controllers, use BUTTON_1, BUTTON_2, ... from the live monitor.
+main {
+    remap(SOUTH, EAST);
+}

@@ -1,0 +1,12 @@
+// Toggle the transform with View; hold RB for 300 ms to press North.
+// Time-aware scripts get scheduled ticks, even when hardware sends no new report.
+int enabled = 1;
+
+main {
+    vm_tctrl(4);
+    if (event_press(VIEW)) enabled = !enabled;
+    if (enabled) {
+        invert(LY);
+        if (get_ival(RB) && get_ptime(RB) >= 300) set_val(NORTH, 100);
+    }
+}

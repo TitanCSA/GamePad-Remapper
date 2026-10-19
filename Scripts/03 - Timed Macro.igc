@@ -1,0 +1,17 @@
+// One South-button press starts a two-step macro. Holding does not retrigger it.
+// Main and physical input continue while the combo waits.
+main {
+    if (event_press(SOUTH)) combo_run(TwoSteps);
+    if (event_press(MENU)) combo_stop(TwoSteps);
+}
+
+combo TwoSteps {
+    set_val(EAST, 100);
+    wait(120);
+    set_val(EAST, 0);
+    wait(80);
+    set_val(NORTH, 100);
+    wait(120);
+    set_val(NORTH, 0);
+    wait(80);
+}
