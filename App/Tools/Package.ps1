@@ -2,7 +2,7 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.0.0'
+$version='2.1.0'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'

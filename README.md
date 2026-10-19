@@ -22,6 +22,10 @@ activity. Normal use displays actual driver state and never invents devices.
 
 </details>
 
+The interface uses four colors: **blue, black, white and gray**. Consistent
+controls, clear keyboard focus and readable spacing keep the script, visual
+settings and live session easy to distinguish.
+
 ## One script, two views
 
 - **Code:** a C-like language with `init`, `main`, variables, arrays, functions,
@@ -33,7 +37,7 @@ activity. Normal use displays actual driver state and never invents devices.
 - **Library:** create, open and save `.igc` files; atomic saves keep the previous
   version as `.bak`. Unsaved edits get recovery drafts. Saved scripts are
   available from the sidebar.
-- **Inject configuration:** compile and apply behavior to captured controllers.
+- **Apply script:** compile and apply behavior to captured controllers.
   **Stop** releases capture. Applying a script updates user-mode behavior; it
   does not load script code into the kernel or flash controller firmware.
 - **Fewer clicks:** automatic background validation, readable behavior summaries,
@@ -46,14 +50,14 @@ activity. Normal use displays actual driver state and never invents devices.
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.0.0-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.1.0-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
 3. Open **`GamePadRemapper.exe`**. Select an example or create a script. Editing
    and compiling work without an installed driver or administrator rights.
-4. Edit in **Code** or **Visual editor**, then choose **Inject configuration**
+4. Edit in **Code** or **Visual editor**, then choose **Apply script**
    (**Ctrl+Enter**).
    Approve Windows elevation when requested: the driver restricts capture to
    administrators. Starting a capture does not require moving a controller.
@@ -69,7 +73,7 @@ capture. **Ctrl+S** saves the script; recovery drafts do not replace that file.
 ## Complex behavior without a complex setup
 
 In **Visual editor**, choose **∞ A + B → additive figure eight**, then
-**Inject configuration**. The recipe holds A + B (`SOUTH` + `EAST`) and checks
+**Apply script**. The recipe holds A + B (`SOUTH` + `EAST`) and checks
 that camera `RX > 50%`; it adds an infinity motion to `LX` / `LY` while that
 condition remains true. Adjust the two axes, width, height and cycle directly
 on the card. Generic HID controllers need their reported `BUTTON_n` / `AXIS_n`

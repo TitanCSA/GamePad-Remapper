@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "ScriptStorage.h"
+#include "Theme.h"
+#include "NativeWidgets.h"
 #include "../Core/VisualDocument.h"
 #include "../Capture/Service.h"
 #include "../ThirdParty/json.hpp"
@@ -26,9 +28,8 @@
 
 namespace gpr {
 namespace {
-constexpr COLORREF Background = RGB(10, 16, 32), Panel = RGB(17, 26, 46), Raised = RGB(25, 37, 59),
-                   Edge = RGB(45, 60, 86), Ink = RGB(237, 242, 254), Muted = RGB(145, 161, 189),
-                   Accent = RGB(167, 154, 255), Mint = RGB(126, 231, 206), Danger = RGB(255, 158, 170);
+constexpr COLORREF Background = ui::Black, Panel = ui::Black, Raised = ui::Black, Edge = ui::Gray,
+                   Ink = ui::White, Muted = ui::Gray, Accent = ui::Blue, Mint = ui::White, Danger = ui::White;
 constexpr UINT CompiledMessage = WM_APP + 20, OperationMessage = WM_APP + 21;
 enum Id {
     Library = 100,
@@ -297,12 +298,13 @@ class MainWindow final {
     HWND window_ = nullptr, form_ = nullptr;
     std::map<int, HWND> controls_, fields_;
     std::vector<HWND> labels_;
-    HFONT font_ = nullptr, codeFont_ = nullptr, titleFont_ = nullptr;
+    HFONT font_ = nullptr, codeFont_ = nullptr, titleFont_ = nullptr, smallFont_ = nullptr,
+          headingFont_ = nullptr;
     HBRUSH panelBrush_ = nullptr, editBrush_ = nullptr;
     UINT dpi_ = 96;
     bool demo_ = false, visual_ = false, building_ = false, settingCode_ = false, busy_ = false,
          closing_ = false, closeRequested_ = false, invalidVisual_ = false, reduced_ = false,
-         formDirty_ = false;
+         formDirty_ = false, layoutTest_ = false;
     std::uint64_t version_ = 0, accepted_ = 0;
     int scroll_ = 0, formHeight_ = 0;
     std::filesystem::path libraryDirectory_, currentPath_, draftPath_, consumedDraft_;
@@ -320,6 +322,7 @@ class MainWindow final {
     ServiceSnapshot snapshot_;
     std::function<int(const std::wstring &)> discardPrompt_;
     RECT editorRect_{};
+    int libraryWidth_ = 224, inspectorWidth_ = 264;
     static LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
         MainWindow *self = reinterpret_cast<MainWindow *>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (message == WM_NCCREATE) {
@@ -390,6 +393,13 @@ class MainWindow final {
         }
         return DefSubclassProc(window, message, w, l);
     }
+    static LRESULT CALLBACK FieldProcedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR,
+                                           DWORD_PTR data) {
+        auto *self = reinterpret_cast<MainWindow *>(data);
+        if (message == WM_SETFOCUS)
+            PostMessageW(self->window_, WM_APP + 26, 0, reinterpret_cast<LPARAM>(window));
+        return DefSubclassProc(window, message, w, l);
+    }
     int S(int value) const { return MulDiv(value, static_cast<int>(dpi_), 96); }
     HWND Control(int id, const wchar_t *type, const std::wstring &text, DWORD style, HWND parent = nullptr) {
         HWND value = CreateWindowExW(0, type, text.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1,
@@ -398,30 +408,43 @@ class MainWindow final {
         if (!value)
             throw std::runtime_error("A Windows interface control could not be created.");
         SendMessageW(value, WM_SETFONT, reinterpret_cast<WPARAM>(font_), FALSE);
+        if (_wcsicmp(type, L"BUTTON") == 0 && (style & BS_TYPEMASK) == BS_AUTOCHECKBOX)
+            ui::StyleCheckBox(value);
+        else if (_wcsicmp(type, L"COMBOBOX") == 0)
+            ui::StyleComboBox(value);
+        else if (_wcsicmp(type, L"EDIT") == 0)
+            ui::StyleEdit(value);
+        if (style & (WS_VSCROLL | WS_HSCROLL))
+            ui::StyleScrollbars(value);
+        ui::SetDpi(value, dpi_);
+        if (form_ && parent == form_)
+            SetWindowSubclass(value, FieldProcedure, 2, reinterpret_cast<DWORD_PTR>(this));
         return value;
     }
     HWND Button(int id, const std::wstring &text, HWND parent = nullptr) {
-        return Control(id, L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, parent);
+        const auto button = Control(id, L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, parent);
+        ui::StyleButton(button, id == Inject                       ? ui::ButtonKind::Primary
+                                : id == CodeTab || id == VisualTab ? ui::ButtonKind::Tab
+                                                                   : ui::ButtonKind::Secondary);
+        ui::SetDpi(button, dpi_);
+        return button;
     }
     void Place(HWND control, int x, int y, int width, int height) {
         MoveWindow(control, S(x), S(y), std::max(1, S(width)), std::max(1, S(height)), TRUE);
     }
     void Fonts() {
-        if (font_)
-            DeleteObject(font_);
-        if (codeFont_)
-            DeleteObject(codeFont_);
-        if (titleFont_)
-            DeleteObject(titleFont_);
-        font_ =
-            CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        codeFont_ =
-            CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
-        titleFont_ = CreateFontW(-S(25), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH,
-                                 L"Segoe UI");
+        for (auto font : {font_, codeFont_, titleFont_, smallFont_, headingFont_})
+            if (font)
+                DeleteObject(font);
+        auto make = [this](int size, int weight, const wchar_t *face, BYTE pitch = DEFAULT_PITCH) {
+            return CreateFontW(-S(size), 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                               OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, pitch, face);
+        };
+        font_ = make(15, FW_NORMAL, L"Segoe UI");
+        smallFont_ = make(13, FW_NORMAL, L"Segoe UI");
+        codeFont_ = make(14, FW_NORMAL, L"Consolas", FIXED_PITCH);
+        headingFont_ = make(17, FW_SEMIBOLD, L"Segoe UI");
+        titleFont_ = make(23, FW_SEMIBOLD, L"Segoe UI");
     }
     void Rich(HWND control, bool mono) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(mono ? codeFont_ : font_), TRUE);
@@ -430,44 +453,44 @@ class MainWindow final {
         format.cbSize = sizeof(format);
         format.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE;
         format.crTextColor = Ink;
-        format.yHeight = 195;
+        const auto actualDpi = GetDpiForWindow(control);
+        format.yHeight =
+            MulDiv(mono ? 210 : 225, static_cast<int>(dpi_), static_cast<int>(actualDpi ? actualDpi : 96));
         wcscpy_s(format.szFaceName, mono ? L"Consolas" : L"Segoe UI");
         SendMessageW(control, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
         SendMessageW(control, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&format));
     }
     void CreateControls() {
-        for (const auto &item :
-             std::vector<std::pair<int, std::wstring>>{{NewFile, L"+ New"},
-                                                       {OpenFile, L"Open…"},
-                                                       {Folder, L"Scripts folder ↗"},
-                                                       {Recover, L"Recover draft"},
-                                                       {Save, L"Save"},
-                                                       {SaveAs, L"Save as…"},
-                                                       {CodeTab, L"{ }  Code"},
-                                                       {VisualTab, L"◇  Visual"},
-                                                       {FindNext, L"Find"},
-                                                       {Check, L"Check script"},
-                                                       {Inject, L"↗  Inject configuration"},
-                                                       {Stop, L"■ Stop"},
-                                                       {Driver, L"Driver setup ↗"},
-                                                       {Copy, L"Copy diagnostics"},
-                                                       {AddRule, L"+ Rule"},
-                                                       {AddMacro, L"+ Macro"},
-                                                       {Infinity, L"∞ Recipe"},
-                                                       {AddConstant, L"+ Constant"},
-                                                       {RemoveItem, L"Remove"}})
+        for (const auto &item : std::vector<std::pair<int, std::wstring>>{{NewFile, L"+ New"},
+                                                                          {OpenFile, L"Open…"},
+                                                                          {Folder, L"Open scripts folder"},
+                                                                          {Recover, L"Recover draft"},
+                                                                          {Save, L"Save"},
+                                                                          {SaveAs, L"Save as…"},
+                                                                          {CodeTab, L"Code"},
+                                                                          {VisualTab, L"Visual"},
+                                                                          {FindNext, L"Find"},
+                                                                          {Check, L"Validate"},
+                                                                          {Inject, L"Apply script"},
+                                                                          {Stop, L"Stop"},
+                                                                          {Driver, L"Driver setup"},
+                                                                          {Copy, L"Copy diagnostics"},
+                                                                          {AddRule, L"+ Rule"},
+                                                                          {AddMacro, L"+ Macro"},
+                                                                          {Infinity, L"Infinity recipe"},
+                                                                          {AddConstant, L"+ Constant"},
+                                                                          {RemoveItem, L"Remove"}})
             controls_[item.first] = Button(item.first, item.second);
-        controls_[Library] =
-            Control(Library, L"LISTBOX", L"",
-                    LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
-        controls_[VisualList] =
-            Control(VisualList, L"LISTBOX", L"",
-                    LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
+        controls_[Library] = Control(Library, L"LISTBOX", L"",
+                                     LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT |
+                                         WS_VSCROLL | WS_TABSTOP);
+        controls_[VisualList] = Control(VisualList, L"LISTBOX", L"",
+                                        LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS |
+                                            LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
         controls_[FindText] = Control(FindText, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP);
-        controls_[Live] = Control(Live, L"BUTTON", L"Live apply valid edits", BS_AUTOCHECKBOX | WS_TABSTOP);
+        controls_[Live] = Control(Live, L"BUTTON", L"Live apply", BS_AUTOCHECKBOX | WS_TABSTOP);
         controls_[Reduce] = Control(Reduce, L"BUTTON", L"Reduce motion", BS_AUTOCHECKBOX | WS_TABSTOP);
-        SetWindowTheme(controls_[Live], L"", L"");
-        SetWindowTheme(controls_[Reduce], L"", L"");
+
         controls_[Code] =
             Control(Code, MSFTEDIT_CLASS, L"",
                     ES_MULTILINE | ES_WANTRETURN | ES_NOHIDESEL | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP);
@@ -482,10 +505,18 @@ class MainWindow final {
                                 window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
         SetWindowLongPtrW(form_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
         SetWindowLongPtrW(form_, GWL_EXSTYLE, WS_EX_CONTROLPARENT);
+        ui::StyleScrollbars(form_);
         BOOL animation = TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0);
         reduced_ = animation == FALSE;
         SendMessageW(controls_[Reduce], BM_SETCHECK, reduced_ ? BST_CHECKED : BST_UNCHECKED, 0);
+        ui::SetAccessibleName(controls_[Library], L"Script library");
+        ui::SetAccessibleName(controls_[VisualList], L"Visual rules, macros and constants");
+        ui::SetAccessibleName(controls_[FindText], L"Find in script");
+        ui::SetAccessibleName(controls_[Code], L"Script code");
+        ui::SetAccessibleName(controls_[Monitor], L"Controller live details");
+        SendMessageW(controls_[FindText], EM_SETCUEBANNER, FALSE,
+                     reinterpret_cast<LPARAM>(L"Find in script"));
         EnableWindow(controls_[Stop], FALSE);
         ShowWindow(controls_[Recover], SW_HIDE);
     }
@@ -494,44 +525,64 @@ class MainWindow final {
             ShowWindow(controls_[id], visual_ ? SW_SHOW : SW_HIDE);
         ShowWindow(form_, visual_ ? SW_SHOW : SW_HIDE);
         ShowWindow(controls_[Code], visual_ ? SW_HIDE : SW_SHOW);
+        ui::SetButtonSelected(controls_[CodeTab], !visual_);
+        ui::SetButtonSelected(controls_[VisualTab], visual_);
         InvalidateRect(window_, nullptr, FALSE);
     }
     void Layout() {
         RECT r{};
         GetClientRect(window_, &r);
-        const int width = MulDiv(r.right, 96, static_cast<int>(dpi_)),
-                  height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
-        const int right = width - 24, body = 112, bottom = height - 42, ex = 254, er = width - 310,
-                  ew = er - ex;
-        editorRect_ = {S(ex), S(body), S(er), S(bottom)};
-        Place(controls_[Driver], right - 136, 26, 136, 34);
-        Place(controls_[Reduce], right - 285, 31, 138, 24);
-        Place(controls_[NewFile], 40, 178, 90, 34);
-        Place(controls_[OpenFile], 138, 178, 90, 34);
-        Place(controls_[Library], 40, 226, 188, std::max(100, bottom - 226 - 136));
-        Place(controls_[Recover], 40, bottom - 126, 188, 31);
-        Place(controls_[Folder], 40, bottom - 88, 188, 32);
-        Place(controls_[Save], er - 172, body + 18, 65, 32);
-        Place(controls_[SaveAs], er - 100, body + 18, 80, 32);
-        Place(controls_[CodeTab], ex + 20, body + 66, 92, 33);
-        Place(controls_[VisualTab], ex + 120, body + 66, 98, 33);
-        Place(controls_[FindText], er - 225, body + 66, 135, 30);
-        Place(controls_[FindNext], er - 84, body + 66, 64, 30);
-        Place(controls_[Code], ex + 20, body + 115, ew - 40, std::max(80, bottom - body - 245));
-        int bx = ex + 20;
-        for (int id : {AddRule, AddMacro, Infinity, AddConstant}) {
-            Place(controls_[id], bx, body + 111, id == Infinity ? 94 : 83, 30);
-            bx += id == Infinity ? 102 : 91;
+        const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
+        const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
+        libraryWidth_ = width < 1100 ? 184 : 224;
+        inspectorWidth_ = width < 1100 ? 208 : 264;
+        const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
+        const int ew = er - ex, bottom = height - 32, contentBottom = bottom - 108;
+        editorRect_ = {S(ex), S(96), S(er), S(bottom)};
+        Place(controls_[Driver], width - 152, 24, 128, 36);
+        Place(controls_[Reduce], width - 304, 26, 140, 32);
+        const int half = (libraryWidth_ - 48) / 2;
+        Place(controls_[NewFile], 20, 144, half, 36);
+        Place(controls_[OpenFile], 28 + half, 144, half, 36);
+        Place(controls_[Library], 20, 196, libraryWidth_ - 40, std::max(80, bottom - 328));
+        Place(controls_[Recover], 20, bottom - 122, libraryWidth_ - 40, 36);
+        Place(controls_[Folder], 20, bottom - 76, libraryWidth_ - 40, 36);
+        Place(controls_[Save], er - 152, 104, 64, 36);
+        Place(controls_[SaveAs], er - 80, 104, 80, 36);
+        Place(controls_[CodeTab], ex, 176, 80, 36);
+        Place(controls_[VisualTab], ex + 88, 176, 80, 36);
+        Place(controls_[Check], ex + 184, 176, 76, 36);
+        const int findWidth = ew < 500 ? 104 : 142;
+        Place(controls_[FindText], er - findWidth - 66, 176, findWidth, 36);
+        Place(controls_[FindNext], er - 58, 176, 58, 36);
+        Place(controls_[Code], ex, 232, ew, std::max(80, contentBottom - 232));
+        RECT codeArea{};
+        GetClientRect(controls_[Code], &codeArea);
+        InflateRect(&codeArea, -S(8), -S(10));
+        SendMessageW(controls_[Code], EM_SETRECT, 0, reinterpret_cast<LPARAM>(&codeArea));
+        int bx = ex;
+        for (const auto item :
+             (ew < 520 ? std::vector<std::pair<int, int>>{{AddRule, 64},
+                                                          {AddMacro, 72},
+                                                          {Infinity, 104},
+                                                          {AddConstant, 86}}
+                       : std::vector<std::pair<int, int>>{
+                             {AddRule, 72}, {AddMacro, 82}, {Infinity, 116}, {AddConstant, 96}})) {
+            Place(controls_[item.first], bx, 232, item.second, 34);
+            bx += item.second + 8;
         }
-        Place(controls_[RemoveItem], er - 92, body + 111, 72, 30);
-        Place(controls_[VisualList], ex + 20, body + 154, 155, std::max(80, bottom - body - 284));
-        Place(form_, ex + 185, body + 154, ew - 205, std::max(80, bottom - body - 284));
-        Place(controls_[Live], ex + 20, bottom - 95, 240, 24);
-        Place(controls_[Check], ex + 20, bottom - 59, 106, 34);
-        Place(controls_[Inject], ex + 135, bottom - 59, 200, 34);
-        Place(controls_[Stop], er - 92, bottom - 59, 72, 34);
-        Place(controls_[Monitor], er + 36, body + 54, right - er - 52, std::max(100, bottom - body - 115));
-        Place(controls_[Copy], er + 36, bottom - 46, right - er - 52, 30);
+        Place(controls_[RemoveItem], er - 72, 232, 72, 34);
+        const int listWidth = ew < 520 ? 112 : 128;
+        Place(controls_[VisualList], ex, 286, listWidth, std::max(40, contentBottom - 286));
+        Place(form_, ex + listWidth + 16, 286, ew - listWidth - 16, std::max(40, contentBottom - 286));
+        Place(controls_[Live], ex, bottom - 58, 148, 38);
+        Place(controls_[Stop], er - 268, bottom - 58, 80, 40);
+        Place(controls_[Inject], er - 180, bottom - 58, 180, 40);
+        const int rx = width - inspectorWidth_ + 24;
+        const int monitorTop = height < 700 ? 304 : 376;
+        Place(controls_[Monitor], rx, monitorTop, inspectorWidth_ - 48,
+              std::max(64, bottom - 64 - monitorTop));
+        Place(controls_[Copy], rx, bottom - 60, inspectorWidth_ - 48, 38);
         if (visual_ && !formDirty_)
             BuildForm();
         InvalidateRect(window_, nullptr, FALSE);
@@ -559,91 +610,143 @@ class MainWindow final {
         RECT r{};
         GetClientRect(window_, &r);
         Fill(dc, r, Background);
-        const int width = MulDiv(r.right, 96, static_cast<int>(dpi_)),
-                  height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
-        Fill(dc, {S(24), S(112), S(240), r.bottom - S(42)}, Panel, 16);
-        Fill(dc, editorRect_, Panel, 16);
-        Fill(dc, {S(width - 294), S(112), r.right - S(24), r.bottom - S(42)}, Panel, 16);
-        Draw(dc, L"◇  GamePad Remapper", {S(26), S(24), S(700), S(65)}, Ink, titleFont_);
-        Draw(dc, L"NATIVE CONTROLLER SCRIPTS · YOUR CONTROLLER. YOUR LOGIC.", {S(29), S(72), S(850), S(92)},
-             Muted);
-        Draw(dc, L"SCRIPT LIBRARY", {S(40), S(132), S(228), S(153)}, Muted);
-        Draw(dc, L"Made for your playstyle", {S(40), S(155), S(230), S(176)}, Ink);
-        Draw(dc, L".igc scripts stay on your PC\nDriver demo: 2 h per boot",
-             {S(40), S(height - 89), S(225), S(height - 45)}, Muted);
-        std::wstring name = currentPath_.empty() ? L"Untitled.igc" : currentPath_.filename().wstring();
+        const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
+        const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
+        const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
+        const int rx = width - inspectorWidth_ + 24, bottom = height - 32;
+        auto line = [&](int x1, int y1, int x2, int y2) { Fill(dc, {S(x1), S(y1), S(x2), S(y2)}, Edge); };
+        line(0, 84, width, 85);
+        line(libraryWidth_, 85, libraryWidth_ + 1, height - 28);
+        line(width - inspectorWidth_, 85, width - inspectorWidth_ + 1, height - 28);
+        line(0, height - 28, width, height - 27);
+        Fill(dc, {S(24), S(22), S(54), S(52)}, Accent, 8);
+        Draw(dc, L"G", {S(24), S(22), S(54), S(52)}, Ink, headingFont_,
+             DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        Draw(dc, L"GamePad Remapper", {S(66), S(16), S(430), S(46)}, Ink, titleFont_);
+        Draw(dc, L"Controller scripting, made simple", {S(66), S(49), S(460), S(70)}, Muted, smallFont_);
+        Draw(dc, L"Your scripts", {S(20), S(108), S(libraryWidth_ - 45), S(132)}, Ink, headingFont_);
+        Draw(dc, std::to_wstring(libraryFiles_.size()),
+             {S(libraryWidth_ - 44), S(111), S(libraryWidth_ - 20), S(132)}, Muted, smallFont_,
+             DT_RIGHT | DT_SINGLELINE);
+        Draw(dc, L"Local .igc files", {S(20), S(bottom - 27), S(libraryWidth_ - 20), S(bottom - 8)}, Muted,
+             smallFont_);
+        std::wstring name = currentPath_.empty() ? L"Untitled script" : currentPath_.stem().wstring();
         if (source_ != saved_ || invalidVisual_)
-            name += L"  •";
-        Draw(dc, name, {editorRect_.left + S(20), S(132), editorRect_.right - S(180), S(157)}, Ink);
+            name += L"  *";
+        Draw(dc, name, {S(ex), S(106), S(er - 170), S(135)}, Ink, headingFont_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        const std::wstring state = demo_                ? L"Demo preview"
+                                   : active_.empty()    ? L"Not applied"
+                                   : active_ == source_ ? L"Applied to your controller"
+                                                        : L"Changes waiting to apply";
+        Draw(dc, state, {S(ex), S(140), S(er), S(160)}, Muted, smallFont_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        line(ex, 220, er, 221);
+        const auto message = !error_.empty() ? L"!  " + Utf16(error_) : Utf16(status_);
+        Draw(dc, message, {S(ex), S(bottom - 96), S(er), S(bottom - 74)}, Ink, font_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        Draw(dc, L"Session", {S(rx), S(108), S(width - 24), S(135)}, Ink, headingFont_);
+        const auto session = demo_               ? L"Preview"
+                             : busy_             ? L"Connecting"
+                             : snapshot_.Running ? L"Running"
+                                                 : L"Stopped";
+        Fill(dc, {S(rx), S(157), S(rx + 7), S(164)}, demo_ || snapshot_.Running || busy_ ? Accent : Muted, 7);
+        Draw(dc, session, {S(rx + 18), S(147), S(width - 24), S(178)}, Ink, headingFont_);
         Draw(dc,
-             demo_                ? L"SIMULATED PREVIEW · no driver access"
-             : active_.empty()    ? L"EDITING · no configuration active"
-             : active_ == source_ ? L"LIVE · this version is active"
-                                  : L"LIVE · edited version not applied",
-             {editorRect_.left + S(20), S(161), editorRect_.right - S(20), S(180)}, Muted);
-        Draw(dc, Utf16(status_),
-             {editorRect_.left + S(20), S(height - 162), editorRect_.right - S(20), S(height - 136)},
-             error_.empty() ? Mint : Danger);
-        Draw(dc, L"LIVE SESSION & CONTROLLERS", {S(width - 278), S(132), S(width - 42), S(156)}, Muted);
-        Draw(dc,
-             demo_ ? L"SIMULATED PREVIEW · no driver or controller connection"
-                   : L"Ctrl+Enter apply · Ctrl+S save · Ctrl+F find",
-             {S(24), r.bottom - S(29), r.right - S(24), r.bottom - S(5)}, Muted);
-        RECT progress{editorRect_.left + S(20), editorRect_.bottom - S(12), editorRect_.right - S(20),
-                      editorRect_.bottom - S(9)};
-        Fill(dc, progress, Edge);
+             demo_               ? L"Simulated controller"
+             : snapshot_.Running ? L"Your script is active"
+                                 : L"Apply a script to begin",
+             {S(rx), S(188), S(width - 24), S(212)}, Muted, smallFont_);
+        const int countTop = height < 700 ? 208 : 250;
+        const int labelTop = height < 700 ? 242 : 290;
+        const int controllerTop = height < 700 ? 274 : 346;
+        const int halfInspector = (inspectorWidth_ - 48) / 2;
+        if (height >= 700)
+            line(rx, 228, width - 24, 229);
+        Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.Received),
+             {S(rx), S(countTop), S(rx + halfInspector), S(countTop + 34)}, Ink, titleFont_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.Changed),
+             {S(rx + halfInspector + 8), S(countTop), S(width - 24), S(countTop + 34)}, Ink, titleFont_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        Draw(dc, L"Inputs", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted, smallFont_);
+        Draw(dc, L"Modified", {S(rx + halfInspector + 8), S(labelTop), S(width - 24), S(labelTop + 20)},
+             Muted, smallFont_);
+        line(rx, controllerTop - (height < 700 ? 8 : 18), width - 24,
+             controllerTop - (height < 700 ? 7 : 17));
+        Draw(dc, L"Controllers", {S(rx), S(controllerTop), S(width - 24), S(controllerTop + 22)}, Ink, font_);
+        Draw(dc, demo_ ? L"1 preview" : std::to_wstring(snapshot_.Devices.size()),
+             {S(rx + 100), S(controllerTop + 1), S(width - 24), S(controllerTop + 23)}, Muted, smallFont_,
+             DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        Draw(dc, L"Ctrl+Enter Apply   /   Ctrl+S Save   /   Ctrl+F Find",
+             {S(20), S(height - 21), S(width - 256), S(height - 3)}, Muted, smallFont_,
+             DT_LEFT | DT_SINGLELINE);
+        Draw(dc, demo_ ? L"Preview - no driver access" : L"Driver demo: 2 hours per boot",
+             {S(width - 264), S(height - 21), S(width - 20), S(height - 3)}, Muted, smallFont_,
+             DT_RIGHT | DT_SINGLELINE);
         if (busy_) {
+            RECT progress{S(ex), S(bottom - 7), S(er), S(bottom - 5)};
             const int available = progress.right - progress.left;
             const int tick = static_cast<int>((GetTickCount64() / 15) % 100);
             const int x = reduced_ ? 0 : available * tick / 100;
-            RECT segment{progress.left + x, progress.top,
-                         std::min(progress.right, progress.left + x + available / 3), progress.bottom};
-            Fill(dc, segment, Accent);
-        } else if (!active_.empty())
-            Fill(dc, progress, Mint);
+            Fill(dc,
+                 {progress.left + x, progress.top,
+                  std::min(progress.right, progress.left + x + available / 3), progress.bottom},
+                 Accent);
+        }
     }
     void DrawItem(const DRAWITEMSTRUCT &item) {
-        if (item.itemID == static_cast<UINT>(-1))
+        if (ui::DrawItem(item))
             return;
-        if (item.CtlType == ODT_BUTTON) {
-            const bool primary = item.CtlID == Inject;
-            COLORREF color = primary ? RGB(116, 94, 223) : Raised;
-            if (item.itemState & ODS_SELECTED)
-                color = Edge;
-            if (!(item.itemState & ODS_DISABLED) && item.itemState & ODS_HOTLIGHT)
-                color = Edge;
-            Fill(item.hDC, item.rcItem, color, 9);
-            Draw(item.hDC, Text(item.hwndItem), item.rcItem, item.itemState & ODS_DISABLED ? Muted : Ink,
-                 font_, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (item.itemID == static_cast<UINT>(-1) || item.CtlType != ODT_LISTBOX)
             return;
-        }
-        if (item.CtlType == ODT_LISTBOX) {
-            Fill(item.hDC, item.rcItem, item.itemState & ODS_SELECTED ? RGB(43, 40, 76) : Panel, 8);
-            RECT name = item.rcItem;
-            name.left += S(10);
-            name.top += S(8);
-            std::wstring heading, detail;
-            if (item.CtlID == Library && item.itemID < libraryFiles_.size()) {
-                heading = libraryFiles_[item.itemID].stem().wstring();
-                detail = L".igc · local script";
-            } else if (item.CtlID == VisualList && item.itemID < rows_.size()) {
-                const auto row = rows_[item.itemID];
-                if (row.Kind == RowKind::Rule) {
-                    heading = Utf16(document_->Rules[row.Index].Source);
-                    detail = L"INPUT RULE";
-                } else if (row.Kind == RowKind::Macro) {
-                    heading = Utf16(document_->Macros[row.Index].Name);
-                    detail = L"MACRO";
-                } else {
-                    heading = Utf16(document_->Constants[row.Index].Name);
-                    detail = L"CONSTANT";
-                }
+        const bool selected = (item.itemState & ODS_SELECTED) != 0;
+        Fill(item.hDC, item.rcItem, selected ? Accent : Background, 6);
+        RECT name = item.rcItem;
+        name.left += S(12);
+        name.right -= S(10);
+        name.top += S(9);
+        std::wstring heading, detail;
+        if (item.CtlID == Library && item.itemID < libraryFiles_.size()) {
+            heading = libraryFiles_[item.itemID].stem().wstring();
+            const auto prefix = heading.find(L" - ");
+            if (prefix == 2)
+                heading = heading.substr(5);
+            detail = L"IGC script";
+        } else if (item.CtlID == VisualList && item.itemID < rows_.size()) {
+            const auto row = rows_[item.itemID];
+            if (row.Kind == RowKind::Rule) {
+                const auto &rule = document_->Rules[row.Index];
+                heading = Utf16(rule.Source);
+                static const wchar_t *kinds[] = {L"Remap", L"Invert", L"Deadzone", L"Sensitivity", L"Block"};
+                detail = kinds[static_cast<std::size_t>(rule.Kind)];
+            } else if (row.Kind == RowKind::Macro) {
+                heading = Utf16(document_->Macros[row.Index].Name);
+                detail = L"Macro";
+            } else {
+                heading = Utf16(document_->Constants[row.Index].Name);
+                detail = L"Constant";
             }
-            name.bottom = name.top + S(21);
-            Draw(item.hDC, heading, name, Ink, font_, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            name.top += S(22);
-            name.bottom += S(22);
-            Draw(item.hDC, detail, name, Muted, font_, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+        if (item.CtlID == Steps && document_ && row_ >= 0 && static_cast<std::size_t>(row_) < rows_.size()) {
+            const auto &macro = document_->Macros[rows_[static_cast<std::size_t>(row_)].Index];
+            if (item.itemID < macro.Steps.size()) {
+                const auto &step = macro.Steps[item.itemID];
+                heading = std::to_wstring(item.itemID + 1) + L". " + Utf16(step.Control);
+                detail = std::to_wstring(step.Value) + L" / " + std::to_wstring(step.DurationMilliseconds) +
+                         L" ms";
+            }
+        }
+        name.bottom = name.top + S(21);
+        Draw(item.hDC, heading, name, Ink, font_, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        name.top += S(23);
+        name.bottom += S(23);
+        Draw(item.hDC, detail, name, selected ? Ink : Muted, smallFont_,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if ((item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT)) {
+            RECT focus = item.rcItem;
+            InflateRect(&focus, -S(3), -S(3));
+            DrawFocusRect(item.hDC, &focus);
         }
     }
     void Error(const std::string &text) {
@@ -869,7 +972,16 @@ class MainWindow final {
     bool Checked(int id) const { return SendMessageW(fields_.at(id), BM_GETCHECK, 0, 0) == BST_CHECKED; }
     HWND Label(const std::wstring &text, int x, int y, int width) {
         auto value = Control(0, L"STATIC", text, SS_LEFT, form_);
-        Place(value, x, y - scroll_, width, 20);
+        SendMessageW(value, WM_SETFONT, reinterpret_cast<WPARAM>(smallFont_), FALSE);
+        HDC dc = GetDC(value);
+        const auto previous = SelectObject(dc, smallFont_);
+        RECT measured{0, 0, S(width), 0};
+        DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &measured,
+                  DT_LEFT | DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+        SelectObject(dc, previous);
+        ReleaseDC(value, dc);
+        Place(value, x, y - scroll_, width,
+              std::max(20, MulDiv(measured.bottom, 96, static_cast<int>(dpi_))));
         labels_.push_back(value);
         return value;
     }
@@ -880,7 +992,7 @@ class MainWindow final {
                              WS_BORDER | WS_TABSTOP |
                                  (multiline ? ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL : ES_AUTOHSCROLL),
                              form_);
-        Place(input, x, y + 23 - scroll_, width, multiline ? 75 : 29);
+        Place(input, x, y + 25 - scroll_, width, multiline ? 84 : 36);
         SendMessageW(input, EM_LIMITTEXT, id == Expression ? 4096 : 4096, 0);
         fields_[id] = input;
     }
@@ -890,17 +1002,21 @@ class MainWindow final {
     void Select(int id, const std::wstring &label, const std::vector<std::wstring> &options, int value, int x,
                 int y, int width) {
         Label(label, x, y, width);
-        auto input = Control(id, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, form_);
+        auto input =
+            Control(id, L"COMBOBOX", L"",
+                    CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, form_);
         for (const auto &option : options)
             SendMessageW(input, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(option.c_str()));
         SendMessageW(input, CB_SETCURSEL, value, 0);
-        Place(input, x, y + 23 - scroll_, width, 300);
+        Place(input, x, y + 25 - scroll_, width, 300);
         fields_[id] = input;
     }
     void ControlSelect(int id, const std::wstring &label, const std::string &value, int x, int y, int width) {
         Label(label, x, y, width);
-        auto input =
-            Control(id, L"COMBOBOX", L"", CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP, form_);
+        auto input = Control(id, L"COMBOBOX", L"",
+                             CBS_DROPDOWN | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | CBS_AUTOHSCROLL |
+                                 WS_VSCROLL | WS_TABSTOP,
+                             form_);
         std::vector<std::string> names;
         for (std::size_t i = 0; i < Controls::Names().size(); ++i)
             if (i < 22 || i >= 32)
@@ -919,14 +1035,16 @@ class MainWindow final {
             SendMessageW(input, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(option.c_str()));
         }
         SetWindowTextW(input, Utf16(value).c_str());
-        Place(input, x, y + 23 - scroll_, width, 320);
+        COMBOBOXINFO combo{sizeof(combo)};
+        if (GetComboBoxInfo(input, &combo) && combo.hwndItem)
+            SendMessageW(combo.hwndItem, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+        Place(input, x, y + 25 - scroll_, width, 320);
         fields_[id] = input;
     }
     void EnableField(bool enabled, int x, int y) {
         auto input = Control(Enabled, L"BUTTON", L"Enabled", BS_AUTOCHECKBOX | WS_TABSTOP, form_);
-        SetWindowTheme(input, L"", L"");
         SendMessageW(input, BM_SETCHECK, enabled ? BST_CHECKED : BST_UNCHECKED, 0);
-        Place(input, x, y - scroll_, 110, 26);
+        Place(input, x, y - scroll_, 110, 32);
         fields_[Enabled] = input;
     }
     int FormWidth() const {
@@ -1010,6 +1128,10 @@ class MainWindow final {
     void BuildForm() {
         if (!form_)
             return;
+        HWND focused = GetFocus();
+        while (focused && GetParent(focused) != form_ && IsChild(form_, focused))
+            focused = GetParent(focused);
+        const int focusedId = focused && GetParent(focused) == form_ ? GetDlgCtrlID(focused) : 0;
         building_ = true;
         formDirty_ = false;
         for (auto &field : fields_)
@@ -1033,35 +1155,35 @@ class MainWindow final {
             Select(Kind, L"Input rule", {L"Remap", L"Invert", L"Deadzone", L"Sensitivity", L"Block"},
                    static_cast<int>(rule.Kind), 12, y, half);
             EnableField(rule.Enabled, half + 24, y + 25);
-            y += 72;
-            ControlSelect(Source, L"From / control", rule.Source, 12, y, half);
+            y += 80;
+            ControlSelect(Source, L"Input control", rule.Source, 12, y, half);
             if (rule.Kind == VisualRuleKind::Remap)
-                ControlSelect(Target, L"To", rule.Target, half + 24, y, half);
-            y += 72;
+                ControlSelect(Target, L"Output control", rule.Target, half + 24, y, half);
+            y += 80;
             if (rule.Kind == VisualRuleKind::Deadzone || rule.Kind == VisualRuleKind::Sensitivity) {
                 EditNumber(Value,
-                           rule.Kind == VisualRuleKind::Deadzone ? L"Deadzone 0–99%" : L"Sensitivity 0–1000%",
+                           rule.Kind == VisualRuleKind::Deadzone ? L"Deadzone (%)" : L"Sensitivity (%)",
                            rule.Value, 12, y, half);
-                y += 72;
+                y += 80;
             }
         } else if (row.Kind == RowKind::Constant) {
             const auto &constant = document_->Constants[row.Index];
             Edit(Name, L"Constant name", constant.Name, 12, y, width);
-            y += 72;
+            y += 80;
             EditNumber(Value, L"Integer value", constant.Value, 12, y, half);
-            y += 72;
+            y += 80;
         } else {
             auto &macro = document_->Macros[row.Index];
-            Edit(Name, L"Macro name", macro.Name, 12, y, width - 126);
-            EnableField(macro.Enabled, width - 102, y + 24);
-            y += 72;
+            Edit(Name, L"Macro name", macro.Name, 12, y, width - 128);
+            EnableField(macro.Enabled, width - 104, y + 24);
+            y += 80;
             Select(Kind, L"Action", {L"Timed sequence", L"Axis motion"}, static_cast<int>(macro.Kind), 12, y,
                    half);
             Select(Activation, L"Activation",
                    {L"On activation", L"While true", L"On deactivation", L"Toggle"},
                    static_cast<int>(macro.Activation), half + 24, y, half);
-            y += 72;
-            Label(L"TRIGGER · Combine ALL / ANY / NOT, buttons and axis thresholds", 12, y, width);
+            y += 80;
+            Label(L"Trigger conditions", 12, y, width);
             y += 26;
             auto tree = Control(TriggerTree, WC_TREEVIEWW, L"",
                                 TVS_HASLINES | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS |
@@ -1069,18 +1191,21 @@ class MainWindow final {
                                 form_);
             TreeView_SetBkColor(tree, Raised);
             TreeView_SetTextColor(tree, Ink);
+            TreeView_SetLineColor(tree, Edge);
+            TreeView_SetItemHeight(tree, S(24));
+            ui::StyleScrollbars(tree);
             Place(tree, 12, y - scroll_, width, 100);
             fields_[TriggerTree] = tree;
             TreeNode(tree, *ConditionAt(macro, {}), TVI_ROOT, {});
             y += 108;
-            for (auto item : std::vector<std::pair<int, std::wstring>>{
-                     {AddCondition, L"+ Condition"}, {RemoveCondition, L"Remove condition"}}) {
+            for (auto item : std::vector<std::pair<int, std::wstring>>{{AddCondition, L"Add condition"},
+                                                                       {RemoveCondition, L"Remove"}}) {
                 auto button = Button(item.first, item.second, form_);
-                Place(button, item.first == AddCondition ? 12 : 150, y - scroll_,
-                      item.first == AddCondition ? 130 : 145, 29);
+                Place(button, item.first == AddCondition ? 12 : 160, y - scroll_,
+                      item.first == AddCondition ? 140 : 84, 34);
                 fields_[item.first] = button;
             }
-            y += 44;
+            y += 48;
             auto *node = ConditionAt(macro, condition_);
             if (!node) {
                 condition_.clear();
@@ -1091,14 +1216,13 @@ class MainWindow final {
                     L"Button released", L"Axis / value", L"Absolute value", L"Held for time", L"Double tap",
                     L"IGC expression"},
                    static_cast<int>(node->Kind), 12, y, width);
-            y += 72;
+            y += 80;
             if (node->Kind >= VisualConditionKind::Held && node->Kind != VisualConditionKind::Expression) {
                 ControlSelect(ConditionControl, L"Control", node->Control, 12, y, half);
                 if (node->Kind == VisualConditionKind::HeldFor ||
                     node->Kind == VisualConditionKind::DoubleTap)
-                    EditNumber(ConditionTime, L"Time window 1–60000 ms", node->Milliseconds, half + 24, y,
-                               half);
-                y += 72;
+                    EditNumber(ConditionTime, L"Time window (ms)", node->Milliseconds, half + 24, y, half);
+                y += 80;
                 if (node->Kind == VisualConditionKind::Compare ||
                     node->Kind == VisualConditionKind::AbsoluteCompare) {
                     const std::vector<std::wstring> ops{L">", L">=", L"<", L"<=", L"==", L"!="};
@@ -1106,7 +1230,7 @@ class MainWindow final {
                     Select(ConditionOperator, L"Comparison", ops,
                            found == ops.end() ? 0 : static_cast<int>(found - ops.begin()), 12, y, half);
                     EditNumber(ConditionValue, L"Threshold", node->Value, half + 24, y, half);
-                    y += 72;
+                    y += 80;
                 }
             }
             if (node->Kind == VisualConditionKind::Expression) {
@@ -1114,37 +1238,34 @@ class MainWindow final {
                 y += 125;
             }
             y += 8;
-            Label(macro.Kind == VisualMacroKind::AxisPattern
-                      ? L"MOTION · Values can be added around your physical stick position"
-                      : L"TIMED STEPS · Select a step to edit its values",
-                  12, y, width);
+            Label(macro.Kind == VisualMacroKind::AxisPattern ? L"Motion" : L"Sequence steps", 12, y, width);
             y += 30;
             if (macro.Kind == VisualMacroKind::AxisPattern) {
                 const auto &p = macro.Pattern;
-                Select(Shape, L"Shape", {L"Figure eight (∞)", L"Circle", L"Sine"}, static_cast<int>(p.Shape),
-                       12, y, half);
+                Select(Shape, L"Shape", {L"Figure eight", L"Circle", L"Sine"}, static_cast<int>(p.Shape), 12,
+                       y, half);
                 Select(Blend, L"Output", {L"Add", L"Replace"}, static_cast<int>(p.Blend), half + 24, y, half);
-                y += 72;
+                y += 80;
                 ControlSelect(TargetX, L"Horizontal axis", p.TargetX, 12, y, half);
                 ControlSelect(TargetY, L"Vertical axis", p.TargetY, half + 24, y, half);
-                y += 72;
-                EditNumber(Width, L"Width 0–100%", p.AmplitudeX, 12, y, half);
-                EditNumber(Height, L"Height 0–100%", p.AmplitudeY, half + 24, y, half);
-                y += 72;
-                EditNumber(Period, L"Cycle 1–3600000 ms", p.PeriodMilliseconds, 12, y, half);
-                EditNumber(Tick, L"Update 1–20 ms", p.TickMilliseconds, half + 24, y, half);
-                y += 72;
+                y += 80;
+                EditNumber(Width, L"Width (%)", p.AmplitudeX, 12, y, half);
+                EditNumber(Height, L"Height (%)", p.AmplitudeY, half + 24, y, half);
+                y += 80;
+                EditNumber(Period, L"Cycle time (ms)", p.PeriodMilliseconds, 12, y, half);
+                EditNumber(Tick, L"Update interval (ms)", p.TickMilliseconds, half + 24, y, half);
+                y += 80;
                 Select(Center, L"Motion center",
                        {L"Follow physical input", L"Position at activation", L"Stick center (0,0)"},
                        static_cast<int>(p.Center), 12, y, width);
-                y += 72;
-                Label(L"On activation/deactivation plays one cycle. While true stops on release. Toggle "
-                      L"activates again to stop. Add follows the live output; fixed centers use Replace.",
-                      12, y, width);
+                y += 80;
+                Label(L"Add follows your live stick position. Replace uses the selected center.", 12, y,
+                      width);
                 y += 65;
             } else {
-                auto list =
-                    Control(Steps, L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP, form_);
+                auto list = Control(
+                    Steps, L"LISTBOX", L"",
+                    LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, form_);
                 for (std::size_t i = 0; i < macro.Steps.size(); ++i) {
                     const auto &s = macro.Steps[i];
                     const auto line = std::to_wstring(i + 1) + L". " + Utf16(s.Control) + L"  " +
@@ -1164,10 +1285,10 @@ class MainWindow final {
                     ControlSelect(StepControl, L"Control", s.Control, 12, y, half);
                     Select(StepBlend, L"Output", {L"Add", L"Replace"}, static_cast<int>(s.Blend), half + 24,
                            y, half);
-                    y += 72;
+                    y += 80;
                     EditNumber(StepValue, L"Value", s.Value, 12, y, half);
-                    EditNumber(StepDuration, L"Hold 1–60000 ms", s.DurationMilliseconds, half + 24, y, half);
-                    y += 72;
+                    EditNumber(StepDuration, L"Duration (ms)", s.DurationMilliseconds, half + 24, y, half);
+                    y += 80;
                 }
                 int x = 12;
                 for (auto item : std::vector<std::pair<int, std::wstring>>{
@@ -1178,12 +1299,19 @@ class MainWindow final {
                     fields_[item.first] = button;
                     x += item.first == AddStep || item.first == RemoveStep ? 96 : 48;
                 }
-                y += 44;
+                y += 48;
             }
         }
         formHeight_ = y + 18;
         RECT client{};
         GetClientRect(form_, &client);
+        const int maximum = std::max(0, formHeight_ - MulDiv(client.bottom, 96, static_cast<int>(dpi_)));
+        const int clamped = std::clamp(scroll_, 0, maximum);
+        if (clamped != scroll_) {
+            ScrollWindowEx(form_, 0, S(scroll_ - clamped), nullptr, nullptr, nullptr, nullptr,
+                           SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+            scroll_ = clamped;
+        }
         SCROLLINFO info{sizeof(info),
                         SIF_RANGE | SIF_PAGE | SIF_POS,
                         0,
@@ -1194,31 +1322,56 @@ class MainWindow final {
         SetScrollInfo(form_, SB_VERT, &info, TRUE);
         building_ = false;
         EnableWindow(form_, !busy_);
+        if (focusedId && fields_.count(focusedId))
+            SetFocus(fields_.at(focusedId));
     }
-    void Scroll(int code, int thumb) {
+    void ScrollTo(int position) {
         RECT client{};
         GetClientRect(form_, &client);
-        const int max = std::max(0, formHeight_ - MulDiv(client.bottom, 96, static_cast<int>(dpi_)));
+        const int maximum = std::max(0, formHeight_ - MulDiv(client.bottom, 96, static_cast<int>(dpi_)));
         const int old = scroll_;
-        if (code == SB_LINEUP)
-            scroll_ -= 38;
-        else if (code == SB_LINEDOWN)
-            scroll_ += 38;
-        else if (code == SB_PAGEUP)
-            scroll_ -= max > 0 ? MulDiv(client.bottom, 96, static_cast<int>(dpi_)) : 0;
-        else if (code == SB_PAGEDOWN)
-            scroll_ += MulDiv(client.bottom, 96, static_cast<int>(dpi_));
-        else if (code == SB_THUMBTRACK || code == SB_THUMBPOSITION) {
-            SCROLLINFO info{sizeof(info), SIF_TRACKPOS, 0, 0, 0, 0, 0};
-            GetScrollInfo(form_, SB_VERT, &info);
-            scroll_ = MulDiv(info.nTrackPos, 96, static_cast<int>(dpi_));
-            (void)thumb;
-        }
-        scroll_ = std::clamp(scroll_, 0, max);
+        scroll_ = std::clamp(position, 0, maximum);
         if (scroll_ != old) {
             ScrollWindowEx(form_, 0, S(old - scroll_), nullptr, nullptr, nullptr, nullptr,
                            SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
             SetScrollPos(form_, SB_VERT, S(scroll_), TRUE);
+        }
+    }
+    void Reveal(HWND control) {
+        if (!visual_ || !IsWindow(control) || !IsChild(form_, control))
+            return;
+        RECT area{}, viewport{};
+        GetWindowRect(control, &area);
+        MapWindowPoints(nullptr, form_, reinterpret_cast<POINT *>(&area), 2);
+        GetClientRect(form_, &viewport);
+        if (area.top < S(8))
+            ScrollTo(scroll_ + MulDiv(area.top - S(8), 96, static_cast<int>(dpi_)));
+        else if (area.bottom > viewport.bottom - S(8))
+            ScrollTo(scroll_ + MulDiv(area.bottom - viewport.bottom + S(8), 96, static_cast<int>(dpi_)));
+    }
+    void Scroll(int code, int thumb) {
+        RECT client{};
+        GetClientRect(form_, &client);
+        const int page = MulDiv(client.bottom, 96, static_cast<int>(dpi_));
+        if (code == SB_LINEUP)
+            ScrollTo(scroll_ - 40);
+        else if (code == SB_LINEDOWN)
+            ScrollTo(scroll_ + 40);
+        else if (code == SB_PAGEUP)
+            ScrollTo(scroll_ - page);
+        else if (code == SB_PAGEDOWN)
+            ScrollTo(scroll_ + page);
+        else if (code == SB_TOP)
+            ScrollTo(0);
+        else if (code == SB_BOTTOM)
+            ScrollTo(formHeight_);
+        else if (code == SB_THUMBTRACK || code == SB_THUMBPOSITION) {
+            SCROLLINFO info{sizeof(info),
+                            static_cast<UINT>(code == SB_THUMBPOSITION ? SIF_POS : SIF_TRACKPOS)};
+            GetScrollInfo(form_, SB_VERT, &info);
+            ScrollTo(
+                MulDiv(code == SB_THUMBPOSITION ? info.nPos : info.nTrackPos, 96, static_cast<int>(dpi_)));
+            (void)thumb;
         }
     }
     bool FlushForm(bool rebuild = false, int changed = 0) {
@@ -1646,9 +1799,10 @@ class MainWindow final {
             if (applied)
                 active_ = source_;
             const bool active = service_ && service_->IsRunning() && active_ == source_;
-            status_ = applied  ? "✓ Live changes applied"
-                      : active ? "✓ This version is active"
-                               : "✓ Valid script · ready to inject";
+            status_ = demo_     ? "Demo preview - no controller connected"
+                      : applied ? "✓ Live changes applied"
+                      : active  ? "✓ This version is active"
+                                : "✓ Valid script · ready to inject";
         }
         UpdateMonitor();
         InvalidateRect(window_, &editorRect_, FALSE);
@@ -1664,13 +1818,20 @@ class MainWindow final {
         }
         if (busy_ || demo_ || !service_)
             return;
+        const bool wasActive = !active_.empty();
         snapshot_ = service_->GetSnapshot();
         if (!snapshot_.Running)
             active_.clear();
         EnableWindow(controls_[Stop], snapshot_.Running);
         SetTimer(window_, 1, snapshot_.Running ? 150 : 1000, nullptr);
         UpdateMonitor();
-        InvalidateRect(window_, &editorRect_, FALSE);
+        RECT area{};
+        GetClientRect(window_, &area);
+        area.left = area.right - S(inspectorWidth_);
+        area.top = S(85);
+        InvalidateRect(window_, &area, FALSE);
+        if (wasActive != !active_.empty())
+            InvalidateRect(window_, &editorRect_, FALSE);
     }
     std::string Values(const ServiceDevice &device) const {
         std::string output;
@@ -1694,41 +1855,58 @@ class MainWindow final {
         return output.empty() ? "Waiting for a physical report" : output;
     }
     void UpdateMonitor() {
-        std::ostringstream out;
-        out << "GamePad Remapper 2.0 · native C++\n"
-            << (demo_ ? "SIMULATED PREVIEW\nNo driver or controller connection." : snapshot_.Status)
-            << "\n\n";
+        std::ostringstream diagnostic;
+        diagnostic << "GamePad Remapper 2.1 - native C++\n"
+                   << (demo_ ? "SIMULATED PREVIEW - no driver or controller access" : snapshot_.Status)
+                   << "\n\n"
+                   << (snapshot_.Running ? "Configuration active" : "Not capturing") << "\n"
+                   << snapshot_.Received << " received / " << snapshot_.Forwarded << " forwarded\n"
+                   << snapshot_.Changed << " changed / " << snapshot_.TimerOutputs << " timed outputs\n"
+                   << snapshot_.Faults << " faults\n"
+                   << std::fixed << std::setprecision(2) << snapshot_.ProcessingMicroseconds
+                   << " us software processing\n\n";
+        std::ostringstream visible;
         if (demo_)
-            out << "Demo controller\nLX 0  LY 0  RX 0  RY 0\nPreview only; no latency results.\n\n";
-        else {
-            out << (snapshot_.Running ? "● Configuration active" : "○ Not capturing") << "\n"
-                << snapshot_.Received << " received / " << snapshot_.Forwarded << " forwarded\n"
-                << snapshot_.Changed << " changed / " << snapshot_.TimerOutputs << " timed outputs\n"
-                << std::fixed << std::setprecision(2) << snapshot_.ProcessingMicroseconds
-                << " µs software processing\n\n";
-            if (snapshot_.Devices.empty())
-                out << "CONTROLLERS\nChoose Inject to connect. Waiting for compatible controllers while "
-                       "capturing.\n\n";
-            for (const auto &device : snapshot_.Devices) {
-                out << device.Name << "\n"
-                    << device.Token << "\n"
-                    << std::count(device.Available.begin(), device.Available.end(), true)
-                    << " available controls\n"
-                    << Values(device) << "\n"
-                    << device.Diagnostic << "\n\n";
-                if (device.Family == 3)
-                    out << "Generic HID: choose reported AXIS / BUTTON / VALUE controls; face aliases are "
-                           "not guessed.\n\n";
-            }
+            visible << "Preview gamepad\nOffline example\n\nLX  0    LY  0\nRX  0    RY  0\n\nLive controls "
+                       "appear here\nafter you apply a script.";
+        else if (snapshot_.Devices.empty())
+            visible << (snapshot_.Running
+                            ? "Waiting for a controller...\n\nCompatible controllers appear automatically."
+                            : "No active session\n\nApply your script to connect a controller.");
+        for (const auto &device : snapshot_.Devices) {
+            visible << device.Name << "\n" << Values(device) << "\n\n";
+            diagnostic << device.Name << "\n"
+                       << device.Token << "\n"
+                       << std::count(device.Available.begin(), device.Available.end(), true)
+                       << " available controls\n"
+                       << Values(device) << "\n"
+                       << device.Diagnostic << "\n\n";
+            if (device.Family == 3)
+                diagnostic << "Generic HID uses reported AXIS / BUTTON / VALUE controls; face aliases are "
+                              "not guessed.\n\n";
         }
-        out << "DIAGNOSTICS\n"
-            << (!error_.empty() ? error_ : status_) << "\n"
-            << snapshot_.Error
-            << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\nStop or close restores "
-               "normal input.\nSoftware timing excludes USB/controller/display latency.";
-        diagnostic_ = out.str();
-        SetText(controls_[Monitor], Utf16(diagnostic_));
-        Rich(controls_[Monitor], false);
+        if (!error_.empty())
+            visible << "\nScript needs attention\n" << error_;
+        if (!snapshot_.Error.empty())
+            visible << "\nConnection details\n" << snapshot_.Error;
+        diagnostic << "DIAGNOSTICS\n"
+                   << (!error_.empty() ? error_ : status_) << "\n"
+                   << snapshot_.Error
+                   << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\n"
+                   << "Stop or close restores normal input.\nSoftware timing excludes USB/controller/display "
+                      "latency.";
+        diagnostic_ = diagnostic.str();
+        const auto text = Utf16(visible.str());
+        if (Text(controls_[Monitor]) != text) {
+            CHARRANGE selection{};
+            POINT position{};
+            SendMessageW(controls_[Monitor], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selection));
+            SendMessageW(controls_[Monitor], EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
+            SetWindowTextW(controls_[Monitor], text.c_str());
+            Rich(controls_[Monitor], false);
+            SendMessageW(controls_[Monitor], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&selection));
+            SendMessageW(controls_[Monitor], EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
+        }
     }
     void Close() {
         if (closing_)
@@ -1753,14 +1931,23 @@ class MainWindow final {
             return;
         }
         if (id >= Property) {
+            const auto field = fields_.find(id);
+            if (event == CBN_SELCHANGE && field != fields_.end() &&
+                SendMessageW(field->second, CB_GETDROPPEDSTATE, 0, 0))
+                return;
+            if (event == EN_SETFOCUS || event == CBN_SETFOCUS) {
+                if (field != fields_.end())
+                    Reveal(field->second);
+            }
             if (event == EN_CHANGE || event == CBN_EDITCHANGE) {
                 formDirty_ = true;
                 invalidVisual_ = false;
                 return;
             }
-            if (event == CBN_SELCHANGE || event == BN_CLICKED) {
+            if (event == CBN_SELCHANGE || event == CBN_SELENDOK || event == BN_CLICKED) {
                 formDirty_ = true;
-                FlushForm(true, id);
+                if (FlushForm(false, id))
+                    PostMessageW(window_, WM_APP + 25, 0, 0);
                 return;
             }
             if (event == EN_KILLFOCUS || event == CBN_KILLFOCUS)
@@ -1906,6 +2093,28 @@ class MainWindow final {
         }
         InvalidateRect(window_, &editorRect_, FALSE);
     }
+    void ApplyDpi(UINT dpi) {
+        const bool wasSettingCode = settingCode_;
+        settingCode_ = true;
+        dpi_ = dpi ? dpi : 96;
+        Fonts();
+        for (const auto &item : controls_) {
+            SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+            ui::SetDpi(item.second, dpi_);
+            if (item.first == Library || item.first == VisualList)
+                SendMessageW(item.second, LB_SETITEMHEIGHT, 0, S(60));
+        }
+        Rich(controls_[Code], true);
+        Rich(controls_[Monitor], false);
+        for (const auto &item : fields_) {
+            SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+            ui::SetDpi(item.second, dpi_);
+        }
+        for (const auto label : labels_)
+            SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(smallFont_), TRUE);
+        ui::SetDpi(form_, dpi_);
+        settingCode_ = wasSettingCode;
+    }
     LRESULT Message(UINT message, WPARAM w, LPARAM l) {
         switch (message) {
         case WM_CREATE:
@@ -1920,24 +2129,22 @@ class MainWindow final {
             return 0;
         case WM_GETMINMAXINFO: {
             auto *info = reinterpret_cast<MINMAXINFO *>(l);
-            info->ptMinTrackSize = {S(1120), S(720)};
+            if (layoutTest_) {
+                info->ptMinTrackSize = {1, 1};
+                return 0;
+            }
+            MONITORINFO monitor{sizeof(monitor)};
+            GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor);
+            info->ptMinTrackSize = {std::min<LONG>(S(1120), monitor.rcWork.right - monitor.rcWork.left),
+                                    std::min<LONG>(S(720), monitor.rcWork.bottom - monitor.rcWork.top)};
             return 0;
         }
         case WM_DPICHANGED:
-            dpi_ = HIWORD(w);
-            Fonts();
-            for (const auto &item : controls_)
-                SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
-            Rich(controls_[Code], true);
-            Rich(controls_[Monitor], false);
-            for (const auto &item : fields_)
-                SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
-            for (const auto label : labels_)
-                SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+            ApplyDpi(HIWORD(w));
             {
-                const auto *r = reinterpret_cast<RECT *>(l);
-                SetWindowPos(window_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
-                             SWP_NOZORDER | SWP_NOACTIVATE);
+                const auto *area = reinterpret_cast<RECT *>(l);
+                SetWindowPos(window_, nullptr, area->left, area->top, area->right - area->left,
+                             area->bottom - area->top, SWP_NOZORDER | SWP_NOACTIVATE);
             }
             Layout();
             return 0;
@@ -1957,7 +2164,8 @@ class MainWindow final {
             DrawItem(*reinterpret_cast<DRAWITEMSTRUCT *>(l));
             return TRUE;
         case WM_MEASUREITEM:
-            reinterpret_cast<MEASUREITEMSTRUCT *>(l)->itemHeight = static_cast<UINT>(S(52));
+            reinterpret_cast<MEASUREITEMSTRUCT *>(l)->itemHeight = static_cast<UINT>(
+                S(reinterpret_cast<MEASUREITEMSTRUCT *>(l)->CtlType == ODT_COMBOBOX ? 30 : 60));
             return TRUE;
         case WM_CTLCOLORSTATIC:
         case WM_CTLCOLORBTN:
@@ -1974,6 +2182,18 @@ class MainWindow final {
             return 0;
         case WM_NOTIFY: {
             auto *header = reinterpret_cast<NMHDR *>(l);
+            if (header->idFrom == TriggerTree && header->code == NM_CUSTOMDRAW) {
+                auto *draw = reinterpret_cast<NMTVCUSTOMDRAW *>(l);
+                if (draw->nmcd.dwDrawStage == CDDS_PREPAINT)
+                    return CDRF_NOTIFYITEMDRAW;
+                if (draw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+                    const bool selected = (draw->nmcd.uItemState & (CDIS_SELECTED | CDIS_FOCUS)) != 0;
+                    draw->clrText = Ink;
+                    draw->clrTextBk = selected ? Accent : Background;
+                    draw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
+                    return CDRF_DODEFAULT;
+                }
+            }
             if (header->idFrom == TriggerTree && header->code == TVN_SELCHANGINGW && !building_) {
                 auto *value = reinterpret_cast<NMTREEVIEWW *>(l);
                 if (!FlushForm())
@@ -1988,6 +2208,9 @@ class MainWindow final {
         }
         case WM_APP + 25:
             BuildForm();
+            return 0;
+        case WM_APP + 26:
+            Reveal(reinterpret_cast<HWND>(l));
             return 0;
         case WM_TIMER:
             if (w == 1)
@@ -2047,9 +2270,19 @@ class MainWindow final {
         type.lpfnWndProc = FormProcedure;
         type.lpszClassName = L"GprVisualForm";
         RegisterClassExW(&type);
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitor);
+        const int workWidth = monitor.rcWork.right - monitor.rcWork.left;
+        const int workHeight = monitor.rcWork.bottom - monitor.rcWork.top;
+        const int initialWidth = std::min(MulDiv(1440, static_cast<int>(GetDpiForSystem()), 96), workWidth);
+        const int initialHeight = std::min(MulDiv(930, static_cast<int>(GetDpiForSystem()), 96), workHeight);
         window_ =
             CreateWindowExW(0, L"GprMainWindow", L"GamePad Remapper", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                            CW_USEDEFAULT, CW_USEDEFAULT, 1440, 930, nullptr, nullptr, instance_, this);
+                            monitor.rcWork.left + (workWidth - initialWidth) / 2,
+                            monitor.rcWork.top + (workHeight - initialHeight) / 2, initialWidth,
+                            initialHeight, nullptr, nullptr, instance_, this);
         if (!window_)
             throw std::runtime_error("The application window could not be created.");
         BOOL dark = TRUE;
@@ -2086,6 +2319,10 @@ class MainWindow final {
             DeleteObject(codeFont_);
         if (titleFont_)
             DeleteObject(titleFont_);
+        if (smallFont_)
+            DeleteObject(smallFont_);
+        if (headingFont_)
+            DeleteObject(headingFont_);
         if (panelBrush_)
             DeleteObject(panelBrush_);
         if (editBrush_)
@@ -2142,9 +2379,24 @@ class MainWindow final {
             RequestInject();
     }
     void Test(std::function<void(bool, const std::string &)> require, const std::filesystem::path &directory);
+    void ResizePreview(int width, int height, UINT dpi = 96) {
+        layoutTest_ = true;
+        ApplyDpi(dpi);
+        SetWindowPos(window_, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        Layout();
+    }
+    HWND PopupPreview() {
+        SetFocus(fields_.at(Activation));
+        SendMessageW(fields_.at(Activation), CB_SHOWDROPDOWN, TRUE, 0);
+        COMBOBOXINFO combo{sizeof(combo)};
+        return GetComboBoxInfo(fields_.at(Activation), &combo) ? combo.hwndList : nullptr;
+    }
+    void HidePopup() { SendMessageW(fields_.at(Activation), CB_SHOWDROPDOWN, FALSE, 0); }
+    void MotionPreview() { ScrollTo(430); }
+
     void Preview(bool macro) {
         error_.clear();
-        status_ = "Simulated preview - scripts compile natively";
+        status_ = "Demo preview - no controller connected";
         SetWindowTextW(controls_[FindText], L"");
         SendMessageW(controls_[Live], BM_SETCHECK, BST_UNCHECKED, 0);
         auto doc = VisualDocument::Parse("// Everyday controller\ndefine CAMERA_SPEED = 115;\nmain {\n    // "
@@ -2351,7 +2603,7 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     }
     const auto newest = version_;
     PumpUntil([&] { return accepted_ == newest; });
-    require(source_.find("edit 29") != std::string::npos && status_.find("Valid") != std::string::npos,
+    require(source_.find("edit 29") != std::string::npos && error_.empty(),
             "Debounced background validation accepts only the newest source");
     require(!service_ && active_.empty(), "Live apply is harmless without an explicitly started capture");
     RequestInject();
@@ -2421,6 +2673,101 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(Values(device).find("AXIS_64 -40 → 30") != std::string::npos,
             "The live monitor prioritizes changed dynamic HID controls");
     discardPrompt_ = nullptr;
+    Preview(true);
+    const auto beforePopup = source_;
+    const auto activation = fields_.at(Activation);
+    SendMessageW(activation, CB_SHOWDROPDOWN, TRUE, 0);
+    SendMessageW(activation, CB_SETCURSEL, static_cast<WPARAM>(VisualMacroActivation::OnExit), 0);
+    Command(Activation, CBN_SELCHANGE);
+    require(source_ == beforePopup && fields_.at(Activation) == activation,
+            "Browsing an open dropdown keeps the current script and controls unchanged");
+    SendMessageW(activation, CB_SETCURSEL, static_cast<WPARAM>(VisualMacroActivation::WhileTrue), 0);
+    SendMessageW(activation, CB_SHOWDROPDOWN, FALSE, 0);
+    Command(Activation, CBN_SELENDCANCEL);
+    require(source_ == beforePopup, "Cancelling a dropdown preserves the exact current configuration");
+    const auto lastProperty = fields_.at(Center);
+    SetFocus(lastProperty);
+    Reveal(lastProperty);
+    RECT focused{}, viewport{};
+    GetWindowRect(lastProperty, &focused);
+    MapWindowPoints(nullptr, form_, reinterpret_cast<POINT *>(&focused), 2);
+    GetClientRect(form_, &viewport);
+    require(scroll_ > 0 && focused.top >= 0 && focused.bottom <= viewport.bottom,
+            "Keyboard focus reveals offscreen properties in the scrolling visual editor");
+    ScrollTo(0);
+    std::wstring libraryLabel(
+        static_cast<std::size_t>(SendMessageW(controls_[Library], LB_GETTEXTLEN, 0, 0)) + 1, L'\0');
+    SendMessageW(controls_[Library], LB_GETTEXT, 0, reinterpret_cast<LPARAM>(libraryLabel.data()));
+    libraryLabel.resize(wcslen(libraryLabel.c_str()));
+    require(!libraryFiles_.empty() && libraryLabel == libraryFiles_.front().filename().wstring(),
+            "Owner-drawn script rows retain real strings for accessibility and keyboard search");
+    CHARRANGE marked{0, 7};
+    SendMessageW(controls_[Monitor], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&marked));
+    error_ = "Detailed compiler information";
+    UpdateMonitor();
+    CHARRANGE retained{};
+    SendMessageW(controls_[Monitor], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&retained));
+    require(retained.cpMin == marked.cpMin && retained.cpMax == marked.cpMax,
+            "Live detail updates preserve the reader's text selection");
+    error_.clear();
+    bool bounded = true, separated = true;
+    const auto beforeLayout = source_;
+    const auto bounds = [this](HWND control) {
+        RECT area{};
+        GetWindowRect(control, &area);
+        MapWindowPoints(nullptr, window_, reinterpret_cast<POINT *>(&area), 2);
+        return area;
+    };
+    bool fieldsBounded = true;
+    for (const auto size :
+         std::vector<POINT>{{1440, 930}, {1280, 800}, {1120, 720}, {960, 540}, {910, 509}}) {
+        ResizePreview(size.x, size.y);
+        RECT client{};
+        GetClientRect(window_, &client);
+        for (const auto &control : controls_) {
+            if (!IsWindowVisible(control.second))
+                continue;
+            const auto area = bounds(control.second);
+            bounded = bounded && area.left >= 0 && area.top >= 0 && area.right <= client.right &&
+                      area.bottom <= client.bottom;
+        }
+        for (auto firstControl = controls_.begin(); firstControl != controls_.end(); ++firstControl) {
+            if (!IsWindowVisible(firstControl->second))
+                continue;
+            for (auto secondControl = std::next(firstControl); secondControl != controls_.end();
+                 ++secondControl) {
+                if (!IsWindowVisible(secondControl->second))
+                    continue;
+                RECT intersection{};
+                const auto first = bounds(firstControl->second), second = bounds(secondControl->second);
+                separated = separated && !IntersectRect(&intersection, &first, &second);
+            }
+        }
+        const auto form = bounds(form_);
+        separated = separated && form.bottom <= client.bottom - S(128);
+        RECT formClient{};
+        GetClientRect(form_, &formClient);
+        for (const auto &field : fields_) {
+            RECT area{};
+            GetWindowRect(field.second, &area);
+            MapWindowPoints(nullptr, form_, reinterpret_cast<POINT *>(&area), 2);
+            fieldsBounded = fieldsBounded && area.left >= 0 && area.right <= formClient.right;
+        }
+    }
+    require(bounded, "Workspace controls remain within normal, compact, minimum and short desktop bounds");
+    require(separated, "Adaptive toolbars and session controls do not overlap on narrow or short desktops");
+    require(fieldsBounded,
+            "Every visual property remains horizontally reachable in narrow and high-DPI workspaces");
+    ResizePreview(1536, 960, 144);
+    RECT highDpi{};
+    GetClientRect(window_, &highDpi);
+    const auto apply = bounds(controls_.at(Inject));
+    require(dpi_ == 144 && apply.right <= highDpi.right && apply.bottom <= highDpi.bottom &&
+                apply.bottom - apply.top >= 60,
+            "150 percent DPI keeps a large reachable primary action and scaled readable controls");
+    require(source_ == beforeLayout,
+            "Resizing and DPI changes preserve exact script text without marking it edited");
+    ResizePreview(1440, 930);
     SetSource(initial, {}, false);
     Command(CodeTab, BN_CLICKED);
     UpdateMonitor();
@@ -2445,20 +2792,48 @@ struct UiEnvironment final {
             CoUninitialize();
     }
 };
-void Screenshot(HWND window, const std::filesystem::path &path) {
+void Screenshot(HWND window, const std::filesystem::path &path, HWND popup = nullptr) {
+    MSG pending{};
+    while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
+        if (pending.message != WM_QUIT) {
+            TranslateMessage(&pending);
+            DispatchMessageW(&pending);
+        }
+    }
     RECT area{};
-    GetWindowRect(window, &area);
+    GetClientRect(window, &area);
+    POINT origin{};
+    ClientToScreen(window, &origin);
+    OffsetRect(&area, origin.x, origin.y);
     const int width = area.right - area.left, height = area.bottom - area.top;
     HDC screen = GetDC(window), memory = CreateCompatibleDC(screen);
     HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
     const auto old = SelectObject(memory, bitmap);
-    RedrawWindow(window, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_INVALIDATE);
-    if (!PrintWindow(window, memory, 2)) {
+    RedrawWindow(window, nullptr, nullptr,
+                 RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE);
+    DwmFlush();
+    if (!PrintWindow(window, memory, PW_CLIENTONLY)) {
         SelectObject(memory, old);
         DeleteObject(bitmap);
         DeleteDC(memory);
         ReleaseDC(window, screen);
         throw std::runtime_error("Windows could not render the native interface.");
+    }
+    if (popup && IsWindowVisible(popup)) {
+        RECT popupArea{};
+        GetWindowRect(popup, &popupArea);
+        const int popupWidth = popupArea.right - popupArea.left,
+                  popupHeight = popupArea.bottom - popupArea.top;
+        HDC popupDc = CreateCompatibleDC(screen);
+        HBITMAP popupBitmap = CreateCompatibleBitmap(screen, popupWidth, popupHeight);
+        const auto previous = SelectObject(popupDc, popupBitmap);
+        RedrawWindow(popup, nullptr, nullptr, RDW_UPDATENOW | RDW_INVALIDATE);
+        PrintWindow(popup, popupDc, 0);
+        BitBlt(memory, popupArea.left - area.left, popupArea.top - area.top, popupWidth, popupHeight, popupDc,
+               0, 0, SRCCOPY);
+        SelectObject(popupDc, previous);
+        DeleteObject(popupBitmap);
+        DeleteDC(popupDc);
     }
     using Microsoft::WRL::ComPtr;
     ComPtr<IWICImagingFactory> factory;
@@ -2550,13 +2925,15 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
         MainWindow window(GetModuleHandleW(nullptr), true, directory / L"Scripts");
         ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
         UpdateWindow(window.Handle());
-        window.Test(
-            [&](bool condition, const std::string &name) {
-                if (!condition)
-                    throw std::runtime_error(name);
-                checks.push_back(name);
-            },
-            directory);
+        if (!report.empty()) {
+            window.Test(
+                [&](bool condition, const std::string &name) {
+                    if (!condition)
+                        throw std::runtime_error(name);
+                    checks.push_back(name);
+                },
+                directory);
+        }
         if (!renderDirectory.empty()) {
             const std::filesystem::path destination(renderDirectory);
             std::filesystem::create_directories(destination);
@@ -2567,10 +2944,25 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
             Screenshot(window.Handle(), destination / L"visual-editor.png");
             window.Preview(true);
             Screenshot(window.Handle(), destination / L"macro-editor.png");
-            SetWindowPos(window.Handle(), nullptr, 0, 0, 1280, 800,
-                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            window.MotionPreview();
+            Screenshot(window.Handle(), destination / L"motion-settings.png");
+            window.Preview(true);
+            const auto popup = window.PopupPreview();
+            Screenshot(window.Handle(), destination / L"dropdown-state.png", popup);
+            window.HidePopup();
+            window.ResizePreview(1280, 800);
+            window.Preview(true);
             Screenshot(window.Handle(), destination / L"compact-layout.png");
-            checks.push_back("Rendered actual native code, visual, macro and compact interface");
+            window.ResizePreview(1120, 720);
+            Screenshot(window.Handle(), destination / L"minimum-layout.png");
+            window.ResizePreview(1536, 960, 144);
+            Screenshot(window.Handle(), destination / L"dpi-150.png");
+            window.ResizePreview(1440, 930);
+            const auto widgets = ui::CreateWidgetPreview(GetModuleHandleW(nullptr));
+            Screenshot(widgets, destination / L"controls-state.png");
+            DestroyWindow(widgets);
+            checks.push_back("Rendered native code, visual, macro, motion, popup, compact, minimum and 150 "
+                             "percent DPI interfaces");
         }
         output["Passed"] = true;
         output["TemporaryDirectory"] = Utf8(directory.wstring());
