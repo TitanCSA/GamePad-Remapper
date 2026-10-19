@@ -19,7 +19,7 @@ using Microsoft.Win32;
 
 namespace GamePadRemapper
 {
-    internal sealed class MainWindow : Window
+    internal sealed partial class MainWindow : Window
     {
         private static readonly string[] ControlNames = Controls.Names.Where(name => !name.StartsWith("RESERVED_", StringComparison.Ordinal)).ToArray();
         private const string EmptyScript = "// GamePad Remapper · IGC\n// Use the visual editor or write your own controller logic.\n\nmain {\n}\n";
@@ -33,7 +33,7 @@ namespace GamePadRemapper
         private readonly TextBox search = new TextBox { Width = 160, ToolTip = "Find in code (Ctrl+F)" };
         private readonly TextBlock title = Theme.Label("Untitled.igc", 17);
         private readonly TextBlock subtitle = Theme.Label("EDITING · no controller capture", 11, Theme.Muted);
-        private readonly TextBlock compileStatus = Theme.Label("Ready to edit. Compile your script before applying it.", 12, Theme.Muted);
+        private readonly TextBlock compileStatus = Theme.Label("Ready to edit · scripts are checked automatically", 12, Theme.Muted);
         private readonly TextBlock footer = Theme.Label("Ready · capture starts only when you choose Inject configuration", 11, Theme.Muted);
         private readonly TextBlock liveStatus = Theme.Label("Not capturing", 14);
         private readonly TextBlock metrics = Theme.Label("0 received  /  0 forwarded", 11, Theme.Muted);
@@ -81,17 +81,19 @@ namespace GamePadRemapper
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
 
             inject = Button("↗  Inject configuration", InjectAsync, true);
+            inject.ToolTip = "Compile and apply in one step (Ctrl+Enter). Invalid edits keep the last working configuration.";
             stop = Button("■  Stop", StopAsync);
             stop.IsEnabled = false;
             codeTab = Button("{ }  Code", () => ShowCode());
             visualTab = Button("◈  Visual editor", () => ShowVisual());
             Content = BuildLayout();
+            InitializeEditingAutomation();
             code.TextChanged += (sender, args) => OnSourceChanged();
             code.SelectionChanged += (sender, args) => UpdateCaret();
             code.PreviewKeyDown += EditorKeyDown;
             library.SelectionChanged += LibrarySelectionChanged;
             Closing += OnClosing;
-            Closed += (sender, args) => { refreshTimer.Stop(); service.Dispose(); };
+            Closed += (sender, args) => { refreshTimer.Stop(); DisposeEditingAutomation(); service.Dispose(); };
             PreviewKeyDown += WindowKeyDown;
             refreshTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(150) };
             refreshTimer.Tick += (sender, args) => RefreshService();
@@ -172,6 +174,7 @@ namespace GamePadRemapper
             Grid.SetRow(library, 1);
             panel.Children.Add(library);
             var bottom = new StackPanel { Margin = new Thickness(0, 15, 0, 0) };
+            bottom.Children.Add(recoverDraft);
             bottom.Children.Add(Button("Open scripts folder ↗", () => { Directory.CreateDirectory(libraryDirectory); Process.Start(new ProcessStartInfo(libraryDirectory) { UseShellExecute = true }); }));
             bottom.Children.Add(new TextBlock { Text = "IGC scripts stay on your PC.\nCode and visual edits share one file.", Foreground = Theme.Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) });
             bottom.Children.Add(new Border { Background = Theme.Brush("#1B2940"), CornerRadius = new CornerRadius(9), Padding = new Thickness(11), Margin = new Thickness(0, 18, 0, 0), Child = Theme.Label("INTERCEPTOR CONTROLLER\nSigned kernel filter driver\n2-hour driver demo per boot", 11, Theme.Muted) });
@@ -251,6 +254,7 @@ namespace GamePadRemapper
             statusRow.Children.Add(codePosition);
             statusRow.Children.Add(compileStatus);
             bottom.Children.Add(statusRow);
+            bottom.Children.Add(liveApply);
             var controls = new Grid { Margin = new Thickness(0, 14, 0, 0) };
             controls.ColumnDefinitions.Add(new ColumnDefinition());
             controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -316,7 +320,9 @@ namespace GamePadRemapper
                     }
                 synchronizing = true;
                 library.Items.Clear();
-                foreach (string path in Directory.EnumerateFiles(libraryDirectory, "*.igc").OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+                var scriptPaths = Directory.EnumerateFiles(libraryDirectory, "*.igc").ToList();
+                if (currentPath != null && File.Exists(currentPath) && !scriptPaths.Contains(currentPath, StringComparer.OrdinalIgnoreCase)) scriptPaths.Add(currentPath);
+                foreach (string path in scriptPaths.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
                 {
                     var item = new ListBoxItem { Tag = path, ToolTip = path };
                     var label = new StackPanel();
@@ -364,11 +370,17 @@ namespace GamePadRemapper
             string source = code.Text;
             int count = 1;
             for (int i = 0; i < source.Length; ++i) if (source[i] == '\n') ++count;
-            var numbering = new StringBuilder(count * 4);
-            for (int i = 1; i <= count; ++i) { if (i > 1) numbering.Append('\n'); numbering.Append(i); }
-            lines.Text = numbering.ToString();
+            if (count != lastLineCount)
+            {
+                var numbering = new StringBuilder(count * 4);
+                for (int i = 1; i <= count; ++i) { if (i > 1) numbering.Append('\n'); numbering.Append(i); }
+                lines.Text = numbering.ToString();
+                lastLineCount = count;
+                lines.ScrollToVerticalOffset(code.VerticalOffset);
+            }
             UpdateTitle();
             if (!synchronizing) { compileStatus.Text = "Edited · check or inject to apply"; compileStatus.Foreground = Theme.Muted; }
+            QueueAutomaticValidation();
         }
 
         private void UpdateTitle()
@@ -399,6 +411,7 @@ namespace GamePadRemapper
 
         private bool SaveScript(bool saveAs)
         {
+            if (!CommitFocusedVisualField()) return false;
             string path = currentPath;
             if (path == null || saveAs)
             {
@@ -411,12 +424,14 @@ namespace GamePadRemapper
             savedSource = code.Text;
             LoadLibrary();
             UpdateTitle();
+            DeleteOwnDraft();
             footer.Text = "Saved " + Path.GetFileName(path) + " · previous version kept in .bak";
             return true;
         }
 
         private bool ConfirmDiscard()
         {
+            if (!CommitFocusedVisualField()) return false;
             if (String.Equals(code.Text, savedSource, StringComparison.Ordinal)) return true;
             var result = MessageBox.Show(this, "Save your changes before continuing?", "Unsaved script", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveScript(false));
@@ -424,6 +439,7 @@ namespace GamePadRemapper
 
         internal void ShowCode()
         {
+            if (!CommitFocusedVisualField()) return;
             visualMode = false;
             editorHost.Content = codePanel;
             codeTab.Background = Theme.Brush("#353054");
@@ -433,6 +449,7 @@ namespace GamePadRemapper
 
         internal bool ShowVisual()
         {
+            if (!CommitFocusedVisualField()) return false;
             try { visualDocument = VisualDocument.Parse(code.Text); }
             catch (Exception exception) { SetError(exception); ShowCode(); return false; }
             visualMode = true;
@@ -446,9 +463,11 @@ namespace GamePadRemapper
 
         private void RebuildVisual()
         {
+            RefreshEditorControlNames();
+            invalidVisualInputs.Clear();
             visualContent.Children.Clear();
             visualContent.Children.Add(new Border { Background = Theme.Brush("#202D3C"), CornerRadius = new CornerRadius(9), Padding = new Thickness(13), Margin = new Thickness(0, 0, 0, 16), Child = Theme.Label(visualDocument.HasAdvancedCode ? "Custom code is preserved. These cards edit the visual section; advanced code stays available in Code." : "Build your controller behavior with cards. Every change is written to the same IGC script.", 12, Theme.Mint) });
-            Section("INPUT RULES", "+ Add rule", () => { visualDocument.Rules.Add(new VisualRule { Kind = VisualRuleKind.Remap, Source = "SOUTH", Target = "EAST", Value = 100, Enabled = true }); CommitVisual(true); });
+            Section("INPUT RULES", "+ Add rule", () => { visualDocument.Rules.Add(new VisualRule { Kind = VisualRuleKind.Remap, Source = DefaultButton(), Target = "EAST", Value = 100, Enabled = true }); CommitVisual(true); }, visualDocument.Rules.Count < 256);
             foreach (var rule in visualDocument.Rules.ToArray())
             {
                 var fields = new StackPanel();
@@ -458,47 +477,21 @@ namespace GamePadRemapper
                 DockPanel.SetDock(enabled, Dock.Right);
                 row.Children.Add(enabled);
                 var kind = new ComboBox { Width = 145, HorizontalAlignment = HorizontalAlignment.Left, ItemsSource = Enum.GetValues(typeof(VisualRuleKind)), SelectedItem = rule.Kind };
-                kind.SelectionChanged += (sender, args) => { rule.Kind = (VisualRuleKind)kind.SelectedItem; CommitVisual(true); };
+                kind.SelectionChanged += (sender, args) => { rule.Kind = (VisualRuleKind)kind.SelectedItem; if (rule.Kind == VisualRuleKind.Deadzone && (rule.Value < 0 || rule.Value > 99)) rule.Value = 8; CommitVisual(true); };
                 row.Children.Add(kind);
                 fields.Children.Add(row);
                 var values = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
                 values.Children.Add(ControlPicker("From / control", rule.Source, value => { rule.Source = value; CommitVisual(false); }));
                 if (rule.Kind == VisualRuleKind.Remap) values.Children.Add(ControlPicker("To", rule.Target, value => { rule.Target = value; CommitVisual(false); }));
                 if (rule.Kind == VisualRuleKind.Deadzone || rule.Kind == VisualRuleKind.Sensitivity)
-                    values.Children.Add(NumberField(rule.Kind == VisualRuleKind.Deadzone ? "Deadzone %" : "Sensitivity %", rule.Value, value => { rule.Value = value; CommitVisual(false); }));
+                    values.Children.Add(NumberField(rule.Kind == VisualRuleKind.Deadzone ? "Deadzone 0–99%" : "Sensitivity 0–1000%", rule.Value, value => { rule.Value = value; CommitVisual(false); }));
                 values.Children.Add(Button("Remove", () => { visualDocument.Rules.Remove(rule); CommitVisual(true); }));
                 fields.Children.Add(values);
                 visualContent.Children.Add(VisualCard(fields));
             }
             if (visualDocument.Rules.Count == 0) EmptyHint("No visual rules. Add a rule to remap a button or adjust an axis.");
-            Section("MACROS", "+ Add macro", () => { var macro = new VisualMacro { Name = "Macro_" + (visualDocument.Macros.Count + 1), Trigger = "SOUTH", Enabled = true }; macro.Steps.Add(new VisualMacroStep { Control = "EAST", Value = 100, DurationMilliseconds = 100 }); visualDocument.Macros.Add(macro); CommitVisual(true); });
-            foreach (var macro in visualDocument.Macros.ToArray())
-            {
-                var fields = new StackPanel();
-                var header = new WrapPanel();
-                header.Children.Add(TextField("Name", macro.Name, value => { macro.Name = value; CommitVisual(false); }, 150));
-                header.Children.Add(ControlPicker("On press", macro.Trigger, value => { macro.Trigger = value; CommitVisual(false); }));
-                var enabled = new CheckBox { Content = "Enabled", IsChecked = macro.Enabled, Margin = new Thickness(0, 24, 10, 0) };
-                enabled.Click += (sender, args) => { macro.Enabled = enabled.IsChecked == true; CommitVisual(false); };
-                header.Children.Add(enabled);
-                fields.Children.Add(header);
-                foreach (var step in macro.Steps.ToArray())
-                {
-                    var row = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
-                    row.Children.Add(ControlPicker("Control", step.Control, value => { step.Control = value; CommitVisual(false); }));
-                    row.Children.Add(NumberField("Value", step.Value, value => { step.Value = value; CommitVisual(false); }));
-                    row.Children.Add(NumberField("Hold (ms)", step.DurationMilliseconds, value => { step.DurationMilliseconds = value; CommitVisual(false); }));
-                    row.Children.Add(Button("×", () => { macro.Steps.Remove(step); CommitVisual(true); }));
-                    fields.Children.Add(row);
-                }
-                var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-                actions.Children.Add(Button("+ Timed step", () => { macro.Steps.Add(new VisualMacroStep { Control = "EAST", Value = 0, DurationMilliseconds = 50 }); CommitVisual(true); }));
-                actions.Children.Add(Button("Remove macro", () => { visualDocument.Macros.Remove(macro); CommitVisual(true); }));
-                fields.Children.Add(actions);
-                visualContent.Children.Add(VisualCard(fields));
-            }
-            if (visualDocument.Macros.Count == 0) EmptyHint("Timed sequences run on a button press. You can still write advanced combos in Code.");
-            Section("CONSTANTS", "+ Add constant", () => { visualDocument.Constants.Add(new VisualConstant { Name = "SETTING_" + (visualDocument.Constants.Count + 1), Value = 50 }); CommitVisual(true); });
+            BuildMacroEditors();
+            Section("CONSTANTS", "+ Add constant", () => { visualDocument.Constants.Add(new VisualConstant { Name = "SETTING_" + (visualDocument.Constants.Count + 1), Value = 50 }); CommitVisual(true); }, visualDocument.Constants.Count < 256);
             foreach (var constant in visualDocument.Constants.ToArray())
             {
                 var row = new WrapPanel();
@@ -509,10 +502,11 @@ namespace GamePadRemapper
             }
         }
 
-        private void Section(string text, string action, Action handler)
+        private void Section(string text, string action, Action handler, bool canAdd = true)
         {
             var row = new DockPanel { Margin = new Thickness(0, 10, 0, 11) };
             var add = Button(action, handler);
+            add.IsEnabled = canAdd;
             DockPanel.SetDock(add, Dock.Right);
             row.Children.Add(add);
             var label = Theme.Label(text, 11, Theme.Muted);
@@ -531,9 +525,9 @@ namespace GamePadRemapper
             return field;
         }
 
-        private static UIElement ControlPicker(string text, string value, Action<string> set)
+        private UIElement ControlPicker(string text, string value, Action<string> set)
         {
-            var selector = new ComboBox { IsEditable = true, ItemsSource = ControlNames, Text = value, ToolTip = "Standard names or generic AXIS_1, BUTTON_1, TRIGGER_1…" };
+            var selector = new ComboBox { IsEditable = true, ItemsSource = editorControlNames, Text = value, ToolTip = "Reported controls appear first while connected. SOUTH = Xbox A / PlayStation Cross; EAST = B / Circle. Generic HID: use reported AXIS_1, BUTTON_1, TRIGGER_1…" };
             selector.LostKeyboardFocus += (sender, args) => set(selector.Text.Trim());
             selector.SelectionChanged += (sender, args) => { var selected = selector.SelectedItem as string; if (selected != null) set(selected); };
             return Field(text, selector, 111);
@@ -549,7 +543,7 @@ namespace GamePadRemapper
         private UIElement NumberField(string text, int value, Action<int> set)
         {
             var input = new TextBox { Text = value.ToString(CultureInfo.InvariantCulture) };
-            input.LostKeyboardFocus += (sender, args) => { int parsed; if (Int32.TryParse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)) { set(parsed); input.BorderBrush = Theme.Brush("#334461"); } else { input.BorderBrush = Theme.Danger; compileStatus.Text = "Enter a whole number for " + text + "."; compileStatus.Foreground = Theme.Danger; } };
+            input.LostKeyboardFocus += (sender, args) => { int parsed; if (Int32.TryParse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)) { invalidVisualInputs.Remove(input); set(parsed); input.BorderBrush = Theme.Brush("#334461"); } else { invalidVisualInputs.Add(input); input.BorderBrush = Theme.Danger; compileStatus.Text = "Enter a whole number for " + text + "."; compileStatus.Foreground = Theme.Danger; } };
             return Field(text, input, 91);
         }
 
@@ -558,13 +552,15 @@ namespace GamePadRemapper
             try
             {
                 string result = visualDocument.BuildSource();
+                visualCommitFailed = false;
                 synchronizing = true;
                 code.Text = result;
                 compileStatus.Text = "Visual changes saved in code · inject to apply";
                 compileStatus.Foreground = Theme.Muted;
                 if (rebuild) RebuildVisual();
+                UpdateMacroSummaries();
             }
-            catch (Exception exception) { SetError(exception); }
+            catch (Exception exception) { visualCommitFailed = true; SetError(exception); }
             finally { synchronizing = false; }
         }
 
@@ -583,13 +579,16 @@ namespace GamePadRemapper
         private async Task<ScriptProgram> CompileInBackground()
         {
             string source = code.Text;
+            long version = compilation.Version;
             try
             {
-                var program = await Task.Run(() => ScriptCompiler.Compile(source));
+                var result = await compilation.CompileAsync(source, version);
+                if (!compilation.IsCurrent(result) || !String.Equals(source, code.Text, StringComparison.Ordinal)) return null;
+                if (result.Error != null) { SetError(result.Error); return null; }
                 operationError = "";
                 compileStatus.Text = "✓ Script valid · ready to inject";
                 compileStatus.Foreground = Theme.Mint;
-                return program;
+                return result.Program;
             }
             catch (Exception exception) { SetError(exception); return null; }
         }
@@ -602,6 +601,7 @@ namespace GamePadRemapper
         internal async Task<bool> CheckScriptTask()
         {
             if (busy) return false;
+            if (!CommitFocusedVisualField()) return false;
             SetBusy(true);
             footer.Text = "Checking script…";
             try
@@ -613,14 +613,14 @@ namespace GamePadRemapper
             finally { SetBusy(false); }
         }
 
-        private void SetError(Exception exception)
+        private void SetError(Exception exception, bool locate = true)
         {
             operationError = exception.Message;
             var scriptError = exception as ScriptException;
             compileStatus.Text = scriptError == null ? exception.Message : "Line " + scriptError.Line + ", column " + scriptError.Column + ": " + exception.Message;
             compileStatus.Foreground = Theme.Danger;
             footer.Text = "Configuration not applied. Any running configuration stays active.";
-            if (scriptError != null)
+            if (scriptError != null && locate)
             {
                 string source = code.Text;
                 int index = 0;
@@ -641,6 +641,7 @@ namespace GamePadRemapper
         internal async void InjectAsync()
         {
             if (busy || preview) return;
+            if (!CommitFocusedVisualField()) return;
             SetBusy(true);
             footer.Text = "Checking script…";
             try
@@ -650,8 +651,9 @@ namespace GamePadRemapper
                 if (!IsAdministrator()) { RelaunchElevated(); return; }
                 footer.Text = "Connecting to Interceptor Gamepad Controller…";
                 await Task.Run(() => service.Inject(program));
+                activeSource = code.Text;
                 operationError = "";
-                footer.Text = "Configuration active · edits take effect only after the next successful Inject";
+                footer.Text = liveApply.IsChecked == true ? "Configuration active · valid edits apply automatically" : "Configuration active · choose Inject to apply further edits";
                 compileStatus.Text = "✓ Configuration applied atomically";
                 compileStatus.Foreground = Theme.Mint;
             }
@@ -668,7 +670,7 @@ namespace GamePadRemapper
             try
             {
                 string executable = Process.GetCurrentProcess().MainModule.FileName;
-                var start = new ProcessStartInfo(executable, "--session " + Quote(pending) + " --origin " + Quote(currentPath ?? "") + " --inject") { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory };
+                var start = new ProcessStartInfo(executable, "--session " + Quote(pending) + " --origin " + Quote(currentPath ?? "") + " --inject" + (liveApply.IsChecked == true ? " --live-apply" : "")) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory };
                 Process.Start(start);
                 closeAllowed = true;
                 Close();
@@ -712,6 +714,7 @@ namespace GamePadRemapper
             code.IsReadOnly = value;
             visualContent.IsEnabled = !value;
             library.IsEnabled = !value;
+            liveApply.IsEnabled = !value;
             inject.IsEnabled = !value && !preview;
             stop.IsEnabled = !value && service.IsRunning;
             activity.IsIndeterminate = value && !Theme.ReducedMotion;
@@ -729,13 +732,13 @@ namespace GamePadRemapper
                 refreshTimer.Interval = TimeSpan.FromMilliseconds(running ? 150 : 1000);
                 liveStatus.Text = running ? "●  Configuration active" : "○  Not capturing";
                 liveStatus.Foreground = running ? Theme.Mint : Theme.Muted;
-                subtitle.Text = running ? "LIVE · Interceptor Gamepad Controller" : "EDITING · no controller capture";
-                metrics.Text = snapshot.Received.ToString("N0", CultureInfo.InvariantCulture) + " received  /  " + snapshot.Forwarded.ToString("N0", CultureInfo.InvariantCulture) + " forwarded";
+                subtitle.Text = running ? (String.Equals(activeSource, code.Text, StringComparison.Ordinal) ? "LIVE · this version is active" : "LIVE · edited version not applied") : "EDITING · no controller capture";
+                metrics.Text = snapshot.Received.ToString("N0", CultureInfo.InvariantCulture) + " received  /  " + snapshot.Forwarded.ToString("N0", CultureInfo.InvariantCulture) + " forwarded\n" + snapshot.Changed.ToString("N0", CultureInfo.InvariantCulture) + " changed  /  " + snapshot.TimerOutputs.ToString("N0", CultureInfo.InvariantCulture) + " timed outputs";
                 timing.Text = "Transform + forward: " + (running ? snapshot.ProcessingMicroseconds.ToString("0.0", CultureInfo.InvariantCulture) + " µs" : "—");
                 stop.IsEnabled = !busy && running;
                 if (!busy) activity.Value = snapshot.Received > lastReceived ? 100 : (running ? 16 : 0);
                 lastReceived = snapshot.Received;
-                string fingerprint = String.Join("|", snapshot.Devices.Select(device => device.Token + ":" + device.Name + ":" + String.Join(",", device.Values ?? new int[0])));
+                string fingerprint = String.Join("|", snapshot.Devices.Select(device => device.Token + ":" + device.Name + ":" + device.Diagnostic + ":" + String.Join(",", device.Available ?? new bool[0]) + ":" + String.Join(",", device.Values ?? new int[0]) + ":" + String.Join(",", device.OutputValues ?? new int[0])));
                 if (!String.Equals(fingerprint, lastDeviceFingerprint, StringComparison.Ordinal))
                 {
                     lastDeviceFingerprint = fingerprint;
@@ -755,6 +758,7 @@ namespace GamePadRemapper
                                 if (device.Available != null && i < device.Available.Length && !device.Available[i]) continue;
                                 if (values.Length > 0) values.Append("  ");
                                 values.Append(device.Controls[i]).Append(' ').Append(device.Values[i]);
+                                if (device.OutputValues != null && i < device.OutputValues.Length && device.OutputValues[i] != device.Values[i]) values.Append(" → ").Append(device.OutputValues[i]);
                                 if (values.Length > 200) { values.Append(" …"); break; }
                             }
                             card.Children.Add(Theme.Label(values.Length == 0 ? "Waiting for a physical report" : values.ToString(), 11, Theme.Mint));
@@ -766,7 +770,7 @@ namespace GamePadRemapper
                 }
                 if (++refreshTicks % 4 == 0 || lastDiagnostics == null || !String.IsNullOrWhiteSpace(snapshot.Error))
                 {
-                    string text = "GamePad Remapper 1.0\nInterceptor Gamepad Controller\n\n" + snapshot.Status + "\n\nReceived: " + snapshot.Received + "\nForwarded: " + snapshot.Forwarded + "\nSoftware processing: " + snapshot.ProcessingMicroseconds.ToString("0.00", CultureInfo.InvariantCulture) + " µs\nControllers: " + snapshot.Devices.Length + "\nAdministrator: " + IsAdministrator() + "\n\n" + snapshot.Error + (String.IsNullOrWhiteSpace(operationError) ? "" : "\nLast operation: " + operationError) + "\n\nDriver demo: 2 hours after the first capture per Windows boot.\nTiming excludes controller/USB/display latency.";
+                    string text = "GamePad Remapper 1.1\nInterceptor Gamepad Controller\n\n" + snapshot.Status + "\n\nReceived: " + snapshot.Received + "\nForwarded: " + snapshot.Forwarded + "\nSoftware processing: " + snapshot.ProcessingMicroseconds.ToString("0.00", CultureInfo.InvariantCulture) + " µs\nControllers: " + snapshot.Devices.Length + "\nAdministrator: " + IsAdministrator() + "\n\n" + snapshot.Error + (String.IsNullOrWhiteSpace(operationError) ? "" : "\nLast operation: " + operationError) + "\n\nDriver demo: 2 hours after the first capture per Windows boot.\nTiming excludes controller/USB/display latency.";
                     if (!String.Equals(lastDiagnostics, text, StringComparison.Ordinal)) { diagnostics.Text = text; lastDiagnostics = text; }
                 }
             }
@@ -814,6 +818,7 @@ namespace GamePadRemapper
         private void FindNext()
         {
             ShowCode();
+            if (visualMode) return;
             string term = search.Text;
             if (String.IsNullOrEmpty(term)) { search.Focus(); return; }
             int start = Math.Min(code.Text.Length, code.SelectionStart + Math.Max(1, code.SelectionLength));
@@ -843,6 +848,7 @@ namespace GamePadRemapper
             if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
             switch (args.Key)
             {
+                case Key.Enter: InjectAsync(); args.Handled = true; break;
                 case Key.S: SaveScript((Keyboard.Modifiers & ModifierKeys.Shift) != 0); args.Handled = true; break;
                 case Key.O: OpenScript(); args.Handled = true; break;
                 case Key.N: NewScript(); args.Handled = true; break;
@@ -862,6 +868,8 @@ namespace GamePadRemapper
                 SetBusy(true);
                 refreshTimer.Stop();
                 await Task.Run(() => service.Stop());
+                try { await draftWrite; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                DeleteOwnDraft();
                 closeAllowed = true;
                 Close();
             }

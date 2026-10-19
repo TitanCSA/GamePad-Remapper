@@ -1,0 +1,21 @@
+// Double-tap View within 250 ms to toggle this script (per device).
+// Hold A+B for 300 ms with RX>50, then press LB to run a timed sequence.
+// Releasing the chord, threshold or enabled state stops it immediately.
+int enabled = 1, held;
+
+main {
+    if (double_tap(VIEW, 250)) enabled = !enabled;
+    if (enabled && get_ival(SOUTH) && get_ival(EAST) && get_ival(RX) > 50) {
+        // Both buttons must have remained held; timing follows physical edges.
+        held = min(get_ptime(SOUTH), get_ptime(EAST));
+        if (held >= 300 && event_press(LB)) combo_restart(Sequence);
+        tick(4);
+    } else combo_stop(Sequence);
+}
+
+combo Sequence {
+    set_val(NORTH, 100); wait(40);
+    set_val(NORTH, 0); wait(30);
+    set_val(WEST, 100); wait(60);
+    set_val(WEST, 0);
+}

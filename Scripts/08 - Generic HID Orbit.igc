@@ -1,0 +1,24 @@
+// Generic descriptor-ordered HID controls: change only these bindings after
+// checking the monitor. No model-specific layout is guessed.
+define BUTTON_A = BUTTON_1;
+define BUTTON_B = BUTTON_2;
+define CAMERA_X = AXIS_3;
+define MOVE_X = AXIS_1;
+define MOVE_Y = AXIS_2;
+define PERIOD = 1600;
+define WIDTH = 25;
+define HEIGHT = 15;
+int active, origin;
+
+main {
+    if (is_available(BUTTON_A) && is_available(BUTTON_B) &&
+        is_available(CAMERA_X) && is_available(MOVE_X) && is_available(MOVE_Y) &&
+        get_ival(BUTTON_A) && get_ival(BUTTON_B) && get_ival(CAMERA_X) > 50) {
+        if (!active) { origin = get_phase(PERIOD); active = 1; }
+        int phase = (get_phase(PERIOD) - origin + PERIOD) % PERIOD;
+        int angle = phase * 360 / PERIOD;
+        add_val(MOVE_X, sin(angle, WIDTH));
+        add_val(MOVE_Y, sin(angle * 2, HEIGHT));
+        tick(4);
+    } else active = 0;
+}

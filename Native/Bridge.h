@@ -8,7 +8,7 @@
 #define GR_API extern "C" __declspec(dllimport)
 #endif
 
-// ABI 1, x64, UTF-16 strings; fixed bounds are part of the ABI.
+// ABI 2, x64, UTF-16 strings; fixed bounds are part of the ABI.
 // Callback: flags 0=physical, 1=macro deadline, 2=config reset, 3=forget source.
 // Return 0 when idle, a positive next deadline in milliseconds, -1 on fault.
 // Available slots alone can be edited. Unknown bytes always retain their source.
@@ -28,6 +28,7 @@ struct GR_Device {
     wchar_t name[128],token[192],diagnostic[384];
     int values[256];
     std::uint8_t available[256];
+    int output_values[256];
 };
 GR_API std::uint32_t __cdecl GR_Probe(wchar_t* message,std::uint32_t characters);
 GR_API std::uint32_t __cdecl GR_Start(GR_Callback callback,void* user);

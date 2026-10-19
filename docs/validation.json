@@ -1,19 +1,27 @@
 ﻿{
-    "Version":  "1.0.0",
-    "VerifiedUtc":  "2026-10-19T19:35:56.4210808Z",
+    "Version":  "1.1.0",
+    "VerifiedUtc":  "2026-10-19T20:14:38.2228766Z",
     "NativePureChecks":  196829,
     "Core":  {
                  "passed":  true,
-                 "tests":  22,
-                 "checks":  70960,
+                 "tests":  32,
+                 "checks":  78761,
                  "benchmark":  {
                                    "scope":  "pure VM; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
                                    "frames":  101000,
-                                   "median_us":  1.151600,
-                                   "p95_us":  1.309500,
-                                   "maximum_batch_average_us":  2.035200,
+                                   "median_us":  1.143600,
+                                   "p95_us":  1.181500,
+                                   "maximum_batch_average_us":  1.843200,
                                    "garbage_collections":  0
-                               }
+                               },
+                 "advanced_benchmark":  {
+                                            "scope":  "pure VM additive figure-eight; 101 batches of 1000 frames after 10000 warmup; not hardware latency",
+                                            "frames":  101000,
+                                            "median_us":  1.512200,
+                                            "p95_us":  2.186500,
+                                            "maximum_batch_average_us":  2.371100,
+                                            "garbage_collections":  0
+                                        }
              },
     "Ui":  {
                "Passed":  true,
@@ -21,6 +29,10 @@
                               "Runtime warmup is repeatable without capture or user-script state",
                               "Empty main compiles",
                               "Background compiler returns to the UI thread",
+                              "Live apply is opt in and opening the editor does not capture",
+                              "A stale background compilation cannot be accepted",
+                              "The newest background compilation can be accepted",
+                              "Updating a stopped session cannot start capture",
                               "Visual selectors include all dynamic HID controls",
                               "Visual mode opens",
                               "Switching views preserves exact source",
@@ -29,11 +41,20 @@
                               "Visual rule survives round trip",
                               "Visual macro compiles",
                               "Macro steps survive round trip",
+                              "One-click infinity recipe preserves additive continuous motion",
+                              "Infinity recipe combines A, B and camera X threshold",
+                              "Compound trigger and figure-eight editor source compiles",
+                              "Changing motion to a sequence or expression creates editable valid defaults",
+                              "Invalid numeric visual edits stay visible until corrected",
+                              "Rapid edits are debounced into one background compilation",
+                              "Live apply can validate in the editor without starting capture",
+                              "Automatic validation reports errors without starting capture",
                               "Invalid script produces compiler diagnostic",
                               "Compiler diagnostic includes source location",
                               "Code search selects matching text",
                               "Atomic save writes new version",
                               "Atomic save preserves previous version",
+                              "Draft recovery is atomic and does not create backup accumulation",
                               "Opening a saved script clears dirty state",
                               "Editing marks the script unsaved",
                               "Test interface never captures hardware"
@@ -42,17 +63,24 @@
            },
     "Live":  {
                  "Passed":  true,
-                 "PhysicalReports":  585,
-                 "Forwarded":  643,
-                 "Changed":  624,
-                 "ScheduledOutputs":  58,
+                 "PhysicalReports":  238,
+                 "Forwarded":  3361,
+                 "Changed":  3213,
+                 "ScheduledOutputs":  3121,
                  "NormalPhaseFaults":  0,
-                 "MeanWorkerMicroseconds":  246.48940170940179,
-                 "ElapsedSeconds":  32.2644765,
-                 "ProcessCpuSeconds":  0.21875,
-                 "PrivateBytes":  31068160,
-                 "Gen0Collections":  0,
+                 "MeanWorkerMicroseconds":  212.47184873949575,
+                 "ElapsedSeconds":  31.075777499999997,
+                 "ProcessCpuSeconds":  0.375,
+                 "PrivateBytes":  36876288,
+                 "Gen0Collections":  1,
+                 "GipAdditiveFigureEight":  true,
+                 "HidAdditiveFigureEight":  true,
+                 "GipDistinctPatternPoints":  20,
+                 "HidDistinctPatternPoints":  19,
+                 "ScheduledDuringQuietInput":  true,
+                 "RestoredAndIdleWhenConditionCeases":  true,
                  "InvalidSourcePreservedCapture":  true,
+                 "LiveUpdateCannotRestartCapture":  true,
                  "RuntimeFaultStoppedCapture":  true,
                  "ReinjectAfterFault":  true,
                  "Stopped":  true,
@@ -62,31 +90,29 @@
                               ],
                  "Scope":  "Managed IGC VM, native worker and signed Interceptor Gamepad Controller pipeline against virtual HID/GIP fixtures. Worker processing excludes USB polling and hardware latency."
              },
-    "TestedBinaries":  [
-                           {
-                               "value":  [
-                                             {
-                                                 "Name":  "GamePadRemapper.Core.dll",
-                                                 "HostSHA256":  "7AD7B8A62B95455FBD5A4D8D7C8EE18AD41FA2A015A2FB1FDA7B05DD155BFAE9",
-                                                 "GuestSHA256":  "7AD7B8A62B95455FBD5A4D8D7C8EE18AD41FA2A015A2FB1FDA7B05DD155BFAE9",
-                                                 "ExactMatch":  true
-                                             },
-                                             {
-                                                 "Name":  "GamePadRemapper.exe",
-                                                 "HostSHA256":  "9C99365B841823A4C5F05D43826C382F31710F470DDCE8565D96AF9C6A175D0B",
-                                                 "GuestSHA256":  "9C99365B841823A4C5F05D43826C382F31710F470DDCE8565D96AF9C6A175D0B",
-                                                 "ExactMatch":  true
-                                             },
-                                             {
-                                                 "Name":  "GamePadRemapper.Native.dll",
-                                                 "HostSHA256":  "745202B5E7889C244F7130901E5E7A3115EB90273DB5E5B043774C450E78259A",
-                                                 "GuestSHA256":  "745202B5E7889C244F7130901E5E7A3115EB90273DB5E5B043774C450E78259A",
-                                                 "ExactMatch":  true
-                                             }
-                                         ],
-                               "Count":  3
-                           }
-                       ],
+    "TestedBinaries":  {
+                           "value":  [
+                                         {
+                                             "Name":  "GamePadRemapper.exe",
+                                             "HostSHA256":  "7CD795BB492BA0F84C9F30E196702243925F5FFA256E278E9890AD9943A3A3E8",
+                                             "GuestSHA256":  "7CD795BB492BA0F84C9F30E196702243925F5FFA256E278E9890AD9943A3A3E8",
+                                             "ExactMatch":  true
+                                         },
+                                         {
+                                             "Name":  "GamePadRemapper.Core.dll",
+                                             "HostSHA256":  "AAD7BC52DE30AFF71211E361CFA54FFEDF13E55029AD3F5BE0E80F92A42B6F16",
+                                             "GuestSHA256":  "AAD7BC52DE30AFF71211E361CFA54FFEDF13E55029AD3F5BE0E80F92A42B6F16",
+                                             "ExactMatch":  true
+                                         },
+                                         {
+                                             "Name":  "GamePadRemapper.Native.dll",
+                                             "HostSHA256":  "3C96256CD867EBE993A29FF76B0477203CDB5B423DAFD06422B91C345394CF7F",
+                                             "GuestSHA256":  "3C96256CD867EBE993A29FF76B0477203CDB5B423DAFD06422B91C345394CF7F",
+                                             "ExactMatch":  true
+                                         }
+                                     ],
+                           "Count":  3
+                       },
     "VmRestored":  true,
     "VmState":  "Off",
     "HostDriverInstalled":  false,

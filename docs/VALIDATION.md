@@ -1,64 +1,65 @@
-# Validation — 1.0.0
+# Validation - 1.1.0
 
-Validation was performed before the first release on Windows x64, with strict
-optimized MSVC / C# builds. [Build and repeat the software checks](BUILD.md).
-The compact [machine-readable summary](validation.json) records the measurements.
+Optimized Windows x64 MSVC/C# builds use warnings as errors. The compact
+[machine-readable results](validation.json) include exact tested binary hashes.
+[Build and repeat the software checks](BUILD.md).
 
 | Area | Result |
 | --- | --- |
-| Native conversion | **196,829 checks passed**: every signed 16-bit XUSB axis value, exact unchanged bytes, unrelated-field preservation, triggers, Guide, GIP tail retention, repeated HID usages, stable descriptor identities, relative values and bounds. |
-| IGC compiler and runtime | **22 groups / 70,960 assertions passed**: syntax, arithmetic, arrays/functions/loops, events, timing, combos, deadlines, bounded faults, isolated instances and visual round trips. |
-| Stress and invalid source | 101,000 measured VM frames after 10,000 warmup frames; 32,000 frames across parallel independent instances; 3,000 malformed-source cases. No garbage collections in the measured VM loop. |
-| UI and storage | **19 checks passed**: noncapturing runtime warmup, background compilation, all dynamic control selectors, view switching, custom-code preservation, macro steps, errors, search, atomic replacement, backup and unsaved state. Actual WPF screenshots rendered and inspected. |
-| Signed-driver integration | Actual released Microsoft-signed Interceptor Gamepad Controller installed in a dedicated Windows 11 VM; HID and GIP virtual fixtures remapped and forwarded through the real managed/native/driver pipeline. |
-| Fault recovery | Bad source preserves the running configuration. Compiled replacement works during capture. Deliberate division by zero reports line/column and releases capture. Reinjection and Stop succeed. |
-| Idle macro output | The fixture producer includes 700 ms every second without submitting a physical report. Scheduled macro output continues during those intervals. |
+| Native conversion | **196,829 checks**: signed axes, unchanged bytes, unrelated fields, triggers, GIP tails, HID identities, repeated usages, relative values and bounds. |
+| Compiler/runtime | **32 groups / 78761 assertions**: arithmetic, isolation, timing, clipping, additive combo holds, nested visual conditions, all activation modes and long-running clocks. |
+| Stress | Two measured 101,000-frame loops after warmup, 32,000 parallel-instance frames, 3,000 malformed scripts, and 3,000 randomized ordered-clipping comparisons. Zero GC in both measured loops. |
+| UI/storage | **32 checks**: background validation, debounce, stale-result rejection, noncapturing live apply, visual transitions, metadata preservation, numeric error retention, atomic saves and drafts. Four actual WPF renders inspected. |
+| Signed integration | Exact unchanged Microsoft-signed driver in a dedicated Windows 11 VM, with real managed/native/driver capture and forwarding against HID/GIP fixtures. |
+| Complex motion | A+B+RX>50 drives additive GIP figure-eight motion around physical LX=10 / LY=-20. Generic HID uses BUTTON_1+BUTTON_2 and AXIS_1/AXIS_2. Both produced multiple distinct points without center drift. |
+| Quiet input | Fixture phases include 1,400 ms without physical submissions. Active patterns continue; button release or a false axis threshold restores physical output and stops timed changes. |
+| Recovery | Invalid source keeps the active config. Live replacement works. Runtime division by zero reports its cause and releases capture. Live apply cannot restart a faulted/stopped capture. Explicit reinjection and Stop pass. |
 
-The final integration run processed **585 physical reports**, forwarded **643
-reports** including **58 scheduled outputs**, and counted **624 changed outputs**
-in its active phase. No capture faults occurred in that phase. A later deliberate
-runtime fault was reported and handled as expected. The test then reinjected an
-unchanged script and stopped capture successfully.
-
-The final run took 32.26 seconds overall, consumed approximately 0.219 process
-CPU seconds, used approximately 29.6 MiB of private process memory, and recorded
-zero generation-0 collections. These figures describe the test runner at its
-fixture cadence, not the full WPF UI or a guaranteed maximum resource cost.
+The normal integration phase processed **238 physical reports**, forwarded
+**3361 reports** including **3121 scheduled outputs**, and recorded **3213 changed
+outputs**, with **zero capture faults**. A later deliberate runtime fault was
+handled as expected. The runner took 31.076 s, used 0.375 process CPU seconds,
+approximately 35.168 MiB private process memory and 1 generation-0 collections.
+This describes the test runner at its fixture cadence, not the full WPF UI or
+a guaranteed maximum resource cost.
 
 ## Timing scope
 
-The pure VM benchmark measured about **1.15 µs per frame** for its median batch
-and **1.31 µs per frame** for its 95th-percentile batch. These are distributions
-of **101 averages of 1,000 frames**, after warmup, not per-packet tail latency.
-The VM benchmark excludes interop, driver calls and all hardware.
+The pure VM median / p95 batch averages were **1.144 / 1.182 us per frame**;
+the additive figure-eight benchmark measured **1.512 / 2.187 us**. Each distribution
+contains 101 averages of 1,000 frames, after 10,000 warmup frames. These are
+software throughput measurements, not per-packet tail or hardware latency.
 
-The final live VM run reported approximately **246 µs mean transform-and-forward
-worker time** per physical event, including initial source setup, callback,
-encoding and synchronous send. That span excludes input wait, receive/batch
-decoding, USB polling, downstream game processing and display latency. VM
-scheduling and machine load affect results. It is not a round-trip or
-controller-to-screen latency measurement.
+The live worker mean was **212.472 us per physical event**, including initial source
+setup, callback, encoding and synchronous send. It excludes input wait,
+receive/batch decoding, USB polling, games and display. VM scheduling and load
+affect all timing; no zero-latency claim is made.
 
-The adapter uses a high-resolution one-shot Windows timer when available, with
-a standard waitable-timer fallback. It does not busy-spin or change the global
-timer resolution. Ordinary remaps are event-driven; scheduled logic wakes only
-when required by its deadlines or explicit periodic script behavior. Runtime
-JIT warmup happens on a fixed throwaway script before capture begins.
+One native worker uses high-resolution one-shot Windows timers, with a standard
+timer fallback. There is no busy-spin or global timer-resolution change.
+Conditional ticks disappear when their path is inactive. The UI's final quiet
+state gets one deferred publication, then that wake is removed. Runtime warmup
+uses a fixed throwaway program before capture.
 
 ## Practical limits
 
-The integration fixtures exercised **HID and GIP**. XUSB conversions were
-exhaustively checked in software; physical XUSB/XInputHID, every controller model,
-wireless transport, proprietary checksum, vibration, adaptive trigger and sensor
-feature were not individually tested. Generic descriptor support is not a
-universal hardware compatibility guarantee.
+Integration exercised virtual **HID and GIP** fixtures. XUSB conversion was
+exhaustively checked in software. Physical XUSB/XInputHID, every model/wireless
+transport, proprietary checksums, vibration, sensors and adaptive triggers were
+not individually tested. Descriptor support is not a universal hardware guarantee.
 
-The VM already had laboratory boot settings and fixture certificates. They were
-preserved. This is not a Secure Boot / HVCI certification. Kernel signature and
-catalog verification belongs to the referenced signed driver release. A fresh
-two-hour expiry wait was not part of the remapper test; this app uses the
-unchanged driver and its existing per-boot allowance.
+The first GIP attempt exposed a setup limitation of the existing signed driver:
+the source had not received protocol metadata after installation/restart and
+remained unready. Reconnecting the laboratory USB fixture completed negotiation;
+the final test used that ready source and a Windows XInput consumer. This release
+does not change the kernel driver's protocol negotiation. If a GIP source is
+missing, inspect the driver's diagnostics and reconnect it after installation.
 
-UAC elevation, save/open dialogs and clipboard access use Windows facilities.
-Their normal paths are implemented; the unattended tests do not claim a manual
-test of every desktop policy, privilege prompt or clipboard owner.
+The dedicated VM's preexisting boot settings, fixture certificates and class
+filters were restored; product services/packages/tasks were removed and Windows
+was shut down normally. Nothing was installed or captured on the host. This is
+not Secure Boot/HVCI certification. The signed driver and its existing two-hour
+per-boot allowance are unchanged; a fresh two-hour expiry wait was not repeated.
+
+UAC, open/save dialogs and clipboard access use Windows facilities. Unattended
+checks do not claim manual coverage of every desktop policy or privilege prompt.

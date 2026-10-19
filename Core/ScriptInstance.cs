@@ -5,22 +5,22 @@ namespace GamePadRemapper.Core
 {
     internal static class Builtins
     {
-        internal static readonly string[] Names = { "get_val", "get_ival", "get_lval", "set_val", "event_press", "event_release", "get_ptime", "get_rtime", "block", "swap", "abs", "min", "max", "clamp", "deadzone", "sensitivity", "rand", "combo_run", "combo_stop", "combo_restart", "combo_running", "combo_stop_all", "remap", "invert", "is_available", "get_controller", "get_device", "get_runtime", "vm_tctrl", "random", "get_brtime", "get_pvar", "set_pvar", "get_bit", "set_bit", "pow", "isqrt", "hypot" };
+        internal static readonly string[] Names = { "get_val", "get_ival", "get_lval", "set_val", "event_press", "event_release", "get_ptime", "get_rtime", "block", "swap", "abs", "min", "max", "clamp", "deadzone", "sensitivity", "rand", "combo_run", "combo_stop", "combo_restart", "combo_running", "combo_stop_all", "remap", "invert", "is_available", "get_controller", "get_device", "get_runtime", "vm_tctrl", "random", "get_brtime", "get_pvar", "set_pvar", "get_bit", "set_bit", "pow", "isqrt", "hypot", "add_val", "sin", "cos", "atan2", "lerp", "wave_sin", "wave_cos", "tick", "get_phase", "double_tap" };
         internal static int Find(string name) { for (int i = 0; i < Names.Length; i++) if (Names[i] == name) return i; return -1; }
         internal static bool Accepts(int id, int count)
         {
             switch (id)
             {
                 case 7: case 21: case 25: case 26: case 27: return count == 0;
-                case 3: case 8: case 9: case 11: case 12: case 16: case 22: case 29: case 32: case 33: case 35: case 37: return count == 2;
-                case 13: case 34: return count == 3;
+                case 3: case 8: case 9: case 11: case 12: case 16: case 22: case 29: case 32: case 33: case 35: case 37: case 38: case 41: case 47: return count == 2;
+                case 13: case 34: case 42: return count == 3;
                 case 31: return count == 4;
-                case 14: return count == 2 || count == 3;
-                case 15: return count == 2 || count == 3;
+                case 14: case 15: case 43: case 44: return count == 2 || count == 3;
+                case 39: case 40: return count == 1 || count == 2;
                 default: return count == 1;
             }
         }
-        internal static bool UsesTime(int id) { return id == 6 || id == 7 || id == 27 || id == 30; }
+        internal static bool UsesTime(int id) { return id == 6 || id == 7 || id == 27 || id == 30 || id == 43 || id == 44 || id == 46; }
     }
     internal struct ReturnPoint { internal int Block, Pc, LocalBase, LocalTop, Stack; }
     internal sealed class VmState
@@ -38,7 +38,10 @@ namespace GamePadRemapper.Core
     internal sealed class ComboState
     {
         internal readonly VmState Vm;
-        internal readonly int[] Held = new int[256];
+        // A held channel is a clamped affine transform of the current input.
+        // Set is a constant transform; additions retain a moving physical base.
+        internal readonly long[] Offset = new long[256];
+        internal readonly int[] Lower = new int[256], Upper = new int[256];
         internal readonly bool[] HasHeld = new bool[256];
         internal bool Running; internal long Deadline;
         internal ComboState(int localCapacity) { Vm = new VmState(localCapacity); }
@@ -50,6 +53,9 @@ namespace GamePadRemapper.Core
         private readonly int[] globals, previous = new int[256];
         private readonly long[] changedAt = new long[256], blockedUntil = new long[256];
         private readonly long[] lastReleasedAt = new long[256];
+        private readonly long[] lastPressedAt = new long[256];
+        private readonly long[] betweenPresses = new long[256];
+        private readonly bool[] hasPressed = new bool[256], priorPress = new bool[256];
         private readonly int[] savedReleaseTime = new int[256], pvars = new int[64];
         private readonly bool[] hasPvar = new bool[64];
         private readonly bool[] pressed = new bool[256], released = new bool[256];
@@ -57,7 +63,7 @@ namespace GamePadRemapper.Core
         private readonly VmState main;
         private readonly ComboState[] combos;
         private ControlFrame frame; private ComboState currentCombo; private Instruction currentInstruction;
-        private long now, startTime, previousTime; private int elapsed, remaining, busy, tickMilliseconds = 1;
+        private long now, startTime, previousTime; private int elapsed, remaining, busy, tickMilliseconds = 1, activeTickMilliseconds;
         private uint randomState = 0xA341316Cu; private bool initialized, timeAware, forcedTicks;
         public int NextWakeMilliseconds { get; private set; }
         private int instructionBudget = 10000;
@@ -81,7 +87,8 @@ namespace GamePadRemapper.Core
                 Array.Clear(globals, 0, globals.Length); Array.Clear(previous, 0, 256); Array.Clear(changedAt, 0, 256); Array.Clear(blockedUntil, 0, 256);
                 Array.Clear(previousAvailable, 0, 256);
                 Array.Clear(lastReleasedAt, 0, 256); Array.Clear(savedReleaseTime, 0, 256); Array.Clear(pvars, 0, 64); Array.Clear(hasPvar, 0, 64);
-                foreach (var combo in combos) combo.Clear(); initialized = forcedTicks = timeAware = false; NextWakeMilliseconds = 0; previousTime = startTime = 0; tickMilliseconds = 1; randomState = 0xA341316Cu;
+                Array.Clear(lastPressedAt, 0, 256); Array.Clear(betweenPresses, 0, 256); Array.Clear(hasPressed, 0, 256); Array.Clear(priorPress, 0, 256);
+                foreach (var combo in combos) combo.Clear(); initialized = forcedTicks = timeAware = false; NextWakeMilliseconds = activeTickMilliseconds = 0; previousTime = startTime = 0; tickMilliseconds = 1; randomState = 0xA341316Cu;
             }
             finally { Volatile.Write(ref busy, 0); }
         }
@@ -94,13 +101,20 @@ namespace GamePadRemapper.Core
             try
             {
                 if (initialized && nowMicroseconds < previousTime) throw new ScriptException("Monotonic time moved backwards.");
-                now = nowMicroseconds; elapsed = Math.Max(0, elapsedMilliseconds); remaining = instructionBudget; NextWakeMilliseconds = 0; timeAware = false;
+                now = nowMicroseconds; elapsed = Math.Max(0, elapsedMilliseconds); remaining = instructionBudget; NextWakeMilliseconds = activeTickMilliseconds = 0; timeAware = false;
                 if (!initialized) { startTime = now; for (int i = 0; i < 256; i++) changedAt[i] = lastReleasedAt[i] = now; }
                 for (int i = 0; i < 256; i++)
                 {
                     // Hats use -1 for neutral; all other controls use zero.
                     bool was = Active(i, previous[i], initialized && previousAvailable[i]), active = Active(i, frame.Physical[i], frame.Available[i]);
                     pressed[i] = !was && active; released[i] = was && !active;
+                    if (!frame.Available[i]) { hasPressed[i] = priorPress[i] = false; betweenPresses[i] = 0; }
+                    if (pressed[i])
+                    {
+                        priorPress[i] = hasPressed[i];
+                        betweenPresses[i] = hasPressed[i] ? now - lastPressedAt[i] : 0;
+                        lastPressedAt[i] = now; hasPressed[i] = true;
+                    }
                     if (pressed[i]) savedReleaseTime[i] = (int)Math.Min(int.MaxValue, (now - lastReleasedAt[i]) / 1000);
                     if (released[i]) lastReleasedAt[i] = now;
                     if (was != active) changedAt[i] = now;
@@ -114,20 +128,26 @@ namespace GamePadRemapper.Core
                 for (int c = 0; c < combos.Length; c++)
                 {
                     var combo = combos[c]; if (!combo.Running) continue;
+                    bool ran = false;
                     if (combo.Deadline <= now)
                     {
                         Array.Clear(combo.HasHeld, 0, 256); currentCombo = combo;
-                        if (!Run(combo.Vm)) combo.Clear(); currentCombo = null;
+                        if (!Run(combo.Vm)) combo.Clear(); currentCombo = null; ran = true;
                     }
                     if (combo.Running)
                     {
-                        for (int i = 0; i < 256; i++) if (combo.HasHeld[i]) frame.Values[i] = combo.Held[i];
+                        // Run already applied this segment once. Reapply only while
+                        // waiting, otherwise additive actions would be doubled.
+                        if (!ran) for (int i = 0; i < 256; i++) if (combo.HasHeld[i]) frame.Values[i] = (int)Math.Max(combo.Lower[i], Math.Min(combo.Upper[i], frame.Values[i] + combo.Offset[i]));
                         Schedule(combo.Deadline);
                     }
                 }
                 for (int c = 0; c < combos.Length; c++) if (combos[c].Running) Schedule(combos[c].Deadline);
                 for (int i = 0; i < 256; i++) if (blockedUntil[i] > now) Schedule(blockedUntil[i]);
-                if ((timeAware || forcedTicks) && (NextWakeMilliseconds == 0 || NextWakeMilliseconds > tickMilliseconds)) NextWakeMilliseconds = tickMilliseconds;
+                // A scoped cadence is requested again by the currently executed path.
+                // Unlike vm_tctrl, leaving that path immediately releases its timer.
+                int cadence = activeTickMilliseconds != 0 ? activeTickMilliseconds : tickMilliseconds;
+                if ((timeAware || forcedTicks || activeTickMilliseconds != 0) && (NextWakeMilliseconds == 0 || NextWakeMilliseconds > cadence)) NextWakeMilliseconds = cadence;
             }
             catch
             {
@@ -219,16 +239,57 @@ namespace GamePadRemapper.Core
         { long duration = (long)milliseconds * 1000; return now > long.MaxValue - duration ? long.MaxValue : now + duration; }
         private int Control(int value) { if ((uint)value >= 256) Error("Control identifier must be between 0 and 255."); return value; }
         private int Combo(int value) { if ((uint)value >= (uint)combos.Length) Error("Unknown combo identifier."); return value; }
-        private void Set(int id, int value)
+        private static void Bounds(int id, out int minimum, out int maximum)
         {
-            id = Control(id); int minimum = id >= 192 && id < 208 ? -1 : id < 4 || id >= 96 && id < 160 ? -100 : 0;
-            int maximum = id >= 192 && id < 208 ? 7 : id >= 208 ? int.MaxValue : 100;
+            minimum = id >= 192 && id < 208 ? -1 : id < 4 || id >= 96 && id < 160 ? -100 : 0;
+            maximum = id >= 192 && id < 208 ? 7 : id >= 208 ? int.MaxValue : 100;
             // Preserve arbitrary signed HID value fields; native conversion validates logical bounds.
             if (id >= 208) minimum = int.MinValue;
-            value = Math.Max(minimum, Math.Min(maximum, value)); frame.Values[id] = value;
-            if (currentCombo != null) { currentCombo.Held[id] = value; currentCombo.HasHeld[id] = true; }
+        }
+        private void Set(int id, long value)
+        {
+            id = Control(id); int minimum, maximum; Bounds(id, out minimum, out maximum);
+            int bounded = (int)Math.Max(minimum, Math.Min(maximum, value)); frame.Values[id] = bounded;
+            if (currentCombo != null)
+            {
+                currentCombo.Offset[id] = 0; currentCombo.Lower[id] = currentCombo.Upper[id] = bounded; currentCombo.HasHeld[id] = true;
+            }
+        }
+        private int Add(int id, int delta)
+        {
+            id = Control(id); int minimum, maximum; Bounds(id, out minimum, out maximum);
+            int bounded = (int)Math.Max(minimum, Math.Min(maximum, (long)frame.Values[id] + delta)); frame.Values[id] = bounded;
+            if (currentCombo != null)
+            {
+                if (!currentCombo.HasHeld[id])
+                {
+                    currentCombo.Offset[id] = delta; currentCombo.Lower[id] = minimum; currentCombo.Upper[id] = maximum; currentCombo.HasHeld[id] = true;
+                }
+                else
+                {
+                    currentCombo.Offset[id] += delta;
+                    currentCombo.Lower[id] = (int)Math.Max(minimum, Math.Min(maximum, (long)currentCombo.Lower[id] + delta));
+                    currentCombo.Upper[id] = (int)Math.Max(minimum, Math.Min(maximum, (long)currentCombo.Upper[id] + delta));
+                }
+            }
+            return bounded;
         }
         private static int SafeAbs(int value) { return value == int.MinValue ? int.MaxValue : Math.Abs(value); }
+        private static int Rounded(double value)
+        { return value <= int.MinValue ? int.MinValue : value >= int.MaxValue ? int.MaxValue : (int)Math.Round(value, MidpointRounding.AwayFromZero); }
+        private static int Trig(double degrees, int amplitude, bool cosine)
+        {
+            double reduced = degrees % 360;
+            // Exact quadrants avoid floating-point cancellation at large amplitudes.
+            if (reduced < 0) reduced += 360;
+            if (cosine) reduced = (reduced + 90) % 360;
+            if (reduced == 0 || reduced == 180) return 0;
+            if (reduced == 90) return amplitude;
+            if (reduced == 270) return amplitude == int.MinValue ? int.MaxValue : -amplitude;
+            if (reduced == 30 || reduced == 150) return Rounded(amplitude * 0.5);
+            if (reduced == 210 || reduced == 330) return Rounded(amplitude * -0.5);
+            return Rounded(Math.Sin(reduced * (Math.PI / 180)) * amplitude);
+        }
         private int Invoke(int id, int[] arguments, int offset, int count)
         {
             if (currentCombo == null && Builtins.UsesTime(id)) timeAware = true;
@@ -271,7 +332,7 @@ namespace GamePadRemapper.Core
                 case 20: return combos[Combo(a)].Running ? 1 : 0;
                 case 21: foreach (var running in combos) running.Clear(); return 0;
                 case 22: a = Control(a); b = Control(b); if (a != b) { Set(b, frame.Physical[a]); Set(a, Neutral(a)); } return 0;
-                case 23: a = Control(a); Set(a, unchecked(-frame.Values[a])); return 0;
+                case 23: a = Control(a); Set(a, -(long)frame.Values[a]); return 0;
                 case 24: return frame.Available[Control(a)] ? 1 : 0;
                 case 25: return unchecked((int)frame.Family);
                 case 26: return unchecked((int)frame.DeviceKey);
@@ -289,6 +350,26 @@ namespace GamePadRemapper.Core
                     if (b < 0 || b > 31) Error("pow exponent must be in 0..31."); int power = 1; while (b-- > 0) power = unchecked(power * a); return power;
                 case 36: if (a < 0) Error("isqrt argument must be nonnegative."); return (int)Math.Sqrt(a);
                 case 37: return (int)Math.Min(int.MaxValue, Math.Sqrt((double)a * a + (double)b * b));
+                case 38: return Add(a, b);
+                case 39: case 40: return Trig(a, count == 2 ? b : 100, id == 40);
+                case 41: return Rounded(Math.Atan2(a, b) * (180 / Math.PI));
+                case 42:
+                    if (c < 0 || c > 100) Error("lerp percentage must be in 0..100.");
+                    return (int)(a + ((long)b - a) * c / 100);
+                case 43: case 44:
+                    if (a < 1 || a > 86400000) Error("Wave period must be in 1..86,400,000 ms.");
+                    long period = (long)a * 1000;
+                    return Trig((now - startTime) % period * (360.0 / period) + (count == 3 ? c % 360 : 0), b, id == 44);
+                case 45:
+                    if (a < 1 || a > 20) Error("tick interval must be in 1..20 ms.");
+                    if (activeTickMilliseconds == 0 || a < activeTickMilliseconds) activeTickMilliseconds = a;
+                    return 0;
+                case 46:
+                    if (a < 1 || a > 86400000) Error("Phase period must be in 1..86,400,000 ms.");
+                    return (int)((now - startTime) / 1000 % a);
+                case 47:
+                    a = Control(a); if (b < 1 || b > 86400000) Error("Double-tap window must be in 1..86,400,000 ms.");
+                    return frame.Available[a] && pressed[a] && priorPress[a] && betweenPresses[a] <= (long)b * 1000 ? 1 : 0;
                 default: Error("Unknown compiled builtin."); return 0;
             }
         }

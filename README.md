@@ -1,6 +1,7 @@
 # GamePad Remapper — Windows Controller Scripting & Macros
 
-A desktop editor for controller remapping, timed macros and **`.igc` scripts**,
+A desktop editor for controller remapping, compound triggers, continuous motion
+and timed macros in **`.igc` scripts**,
 powered by [Interceptor Gamepad & Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller),
 a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 
@@ -25,14 +26,19 @@ activity. Normal use displays actual driver state and never invents devices.
 
 - **Code:** a C-like language with `init`, `main`, variables, arrays, functions,
   conditionals, loops, arithmetic, input events and timed `combo` sequences.
-- **Visual:** remap, invert, deadzone and sensitivity cards, editable constants,
-  macro triggers and timed steps. Switch back to code at any time. Advanced code
-  is preserved; the visual editor changes its own marked script section.
+- **Visual:** remap and axis cards; nested **ALL / ANY / NOT** triggers, holds,
+  double taps and axis thresholds; timed sequences or figure-eight, circle and
+  sine motion. Add the ready-to-edit infinity recipe with one click.
+  Advanced code is preserved when switching views.
 - **Library:** create, open and save `.igc` files; atomic saves keep the previous
-  version as `.bak`. Saved scripts are available from the sidebar.
+  version as `.bak`. Unsaved edits get recovery drafts. Saved scripts are
+  available from the sidebar.
 - **Inject configuration:** compile and apply behavior to captured controllers.
   **Stop** releases capture. Applying a script updates user-mode behavior; it
   does not load script code into the kernel or flash controller firmware.
+- **Fewer clicks:** automatic background validation, readable behavior summaries,
+  connected controls first in selectors, and optional **Live apply valid edits**.
+  Invalid edits keep the last working configuration.
 - **Monitor:** actual controller activity, forwarding counts, measured processing
   time and copyable diagnostics. The UI runs separately from the input worker.
 
@@ -40,22 +46,75 @@ activity. Normal use displays actual driver state and never invents devices.
 
 Windows 10/11 **x64**, .NET Framework **4.8**.
 
-1. Download and extract `GamePad-Remapper-1.0.0-win-x64.zip`. Keep the EXE and
+1. Download and extract `GamePad-Remapper-1.1.0-win-x64.zip`. Keep the EXE and
    both DLLs together. The ZIP includes example scripts and the driver installer.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
 3. Open **`GamePadRemapper.exe`**. Select an example or create a script. Editing
    and compiling work without an installed driver or administrator rights.
-4. Edit in **Code** or **Visual editor**, then choose **Inject configuration**.
+4. Edit in **Code** or **Visual editor**, then choose **Inject configuration**
+   (**Ctrl+Enter**).
    Approve Windows elevation when requested: the driver restricts capture to
    administrators. Starting a capture does not require moving a controller.
 5. Use **Stop** before another capture application. Closing this app also
    releases capture and restores physical input passthrough.
 
 Your library is stored in `Documents/GamePad Remapper/Scripts`. You can open
-`.igc` files from any folder. Changing an editor document does not apply it until
-you inject that configuration.
+`.igc` files from any folder. Enable **Live apply valid edits** once per session
+to apply subsequent valid changes after a short editing pause. It only updates
+an already-running capture; opening a file or enabling the option never starts
+capture. **Ctrl+S** saves the script; recovery drafts do not replace that file.
+
+## Complex behavior without a complex setup
+
+In **Visual editor**, choose **∞ A + B → additive figure eight**, then
+**Inject configuration**. The recipe holds A + B (`SOUTH` + `EAST`) and checks
+that camera `RX > 50%`; it adds an infinity motion to `LX` / `LY` while that
+condition remains true. Adjust the two axes, width, height and cycle directly
+on the card. Generic HID controllers need their reported `BUTTON_n` / `AXIS_n`
+bindings instead of assumed button labels.
+
+With physical `LX = 10%` and `LY = -20%`, those values are the moving center.
+Each evaluation starts from current physical input and adds the motion once:
+there is no accumulated drift. Moving the stick moves that center; releasing
+either button or dropping `RX` to `50%` stops the recipe on the next received
+input. Output stays within the axis limits. **Replace** can instead follow
+physical input, hold the position at activation, or use `(0, 0)` as its center.
+
+Combine nested conditions, custom expressions, stateful functions and combos
+for other behaviors. Sequences support activation, repeat-while-true,
+deactivation and toggle modes; steps can **Add** or **Replace**. The code view
+remains available for logic beyond the visual cards.
+
+<details>
+<summary>The same additive figure eight as an IGC script</summary>
+
+```c
+define PERIOD = 1200;
+int active, origin;
+
+main {
+    if (get_ival(SOUTH) && get_ival(EAST) && get_ival(RX) > 50 &&
+        is_available(LX) && is_available(LY)) {
+        if (!active) { origin = get_phase(PERIOD); active = 1; }
+        int phase = (get_phase(PERIOD) - origin + PERIOD) % PERIOD;
+        int angle = phase * 360 / PERIOD;
+        add_val(LX, sin(angle, 30));
+        add_val(LY, sin(angle * 2, 20));
+        tick(4);
+    } else active = 0;
+}
+```
+
+`sin` uses degrees and returns an integer scaled by its second argument.
+`add_val` composes with existing output; with no earlier transform, that is the
+physical stick. `get_phase` uses monotonic time, so phase does not drift when
+Windows delivers a late tick. `tick(4)` requests updates only on this active
+path. See [the complete example](Scripts/07%20-%20Additive%20Figure%20Eight.igc)
+and [generic HID version](Scripts/08%20-%20Generic%20HID%20Orbit.igc).
+
+</details>
 
 ## A small IGC script
 

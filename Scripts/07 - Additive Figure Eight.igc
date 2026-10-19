@@ -1,0 +1,23 @@
+// Hold A + B while the camera stick RX is above +50%.
+// The other stick traces an 8 around its CURRENT physical position.
+// Example: physical LX=10, LY=-20 remains the moving center, never an accumulated output.
+// Releasing either button or RX restores physical input immediately.
+define PERIOD = 1200;
+define WIDTH = 30;
+define HEIGHT = 20;
+int orbit_active, phase_origin;
+
+main {
+    if (get_ival(SOUTH) && get_ival(EAST) && get_ival(RX) > 50 &&
+        is_available(LX) && is_available(LY)) {
+        if (!orbit_active) {
+            phase_origin = get_phase(PERIOD);
+            orbit_active = 1;
+        }
+        int phase = (get_phase(PERIOD) - phase_origin + PERIOD) % PERIOD;
+        int angle = phase * 360 / PERIOD;
+        add_val(LX, sin(angle, WIDTH));
+        add_val(LY, sin(angle * 2, HEIGHT));
+        tick(4);
+    } else orbit_active = 0;
+}

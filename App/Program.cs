@@ -15,8 +15,8 @@ using GamePadRemapper.Core;
 [assembly: System.Reflection.AssemblyDescription("IGC controller scripts, visual remapping and macros for Interceptor Gamepad Controller")]
 [assembly: System.Reflection.AssemblyCompany("TitanCSA")]
 [assembly: System.Reflection.AssemblyProduct("GamePad Remapper")]
-[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
 
 namespace GamePadRemapper
 {
@@ -47,6 +47,7 @@ namespace GamePadRemapper
                 var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
                 Theme.Apply(app);
                 var window = new MainWindow(args.Contains("--demo"));
+                window.LiveApplyEnabled = args.Contains("--live-apply");
                 app.DispatcherUnhandledException += (sender, error) =>
                 {
                     error.Handled = true;
@@ -106,6 +107,18 @@ namespace GamePadRemapper
                 window.Source = "// This custom comment must survive.\nmain {\n}\n";
                 Require(window.CheckScript(), "Empty main compiles", checks);
                 Require(CheckAsynchronously(window), "Background compiler returns to the UI thread", checks);
+                Require(!window.LiveApplyEnabled && !window.CaptureRunning, "Live apply is opt in and opening the editor does not capture", checks);
+                using (var coordinator = new CompilationCoordinator())
+                {
+                    coordinator.Advance();
+                    var stale = coordinator.CompileAsync("main { set_val(SOUTH, 100); }", coordinator.Version);
+                    coordinator.Advance();
+                    var current = coordinator.CompileAsync("main { set_val(EAST, 50); }", coordinator.Version);
+                    Require(!coordinator.IsCurrent(stale.GetAwaiter().GetResult()), "A stale background compilation cannot be accepted", checks);
+                    Require(coordinator.IsCurrent(current.GetAwaiter().GetResult()), "The newest background compilation can be accepted", checks);
+                }
+                using (var inactive = new RemapperService())
+                    Require(!inactive.TryUpdate(ScriptCompiler.Compile("main {}")), "Updating a stopped session cannot start capture", checks);
                 Require(MainWindow.HasControl("BUTTON_64") && MainWindow.HasControl("AXIS_64") && MainWindow.HasControl("TRIGGER_32") && MainWindow.HasControl("HAT_16") && MainWindow.HasControl("VALUE_48"), "Visual selectors include all dynamic HID controls", checks);
                 string untouched = window.Source;
                 Require(window.ShowVisual(), "Visual mode opens", checks);
@@ -123,6 +136,27 @@ namespace GamePadRemapper
                 window.Source = document.BuildSource();
                 Require(window.CheckScript(), "Visual macro compiles", checks);
                 Require(VisualDocument.Parse(window.Source).Macros[0].Steps.Count == 2, "Macro steps survive round trip", checks);
+                window.AddInfinityRecipe();
+                var infinity = VisualDocument.Parse(window.Source).Macros.Last();
+                Require(infinity.Kind == VisualMacroKind.AxisPattern && infinity.Activation == VisualMacroActivation.WhileTrue && infinity.Pattern.Shape == VisualPatternShape.FigureEight && infinity.Pattern.Blend == VisualBlend.Add, "One-click infinity recipe preserves additive continuous motion", checks);
+                Require(infinity.Condition.Kind == VisualConditionKind.All && infinity.Condition.Children.Count == 3 && infinity.Condition.Children[2].Control == "RX" && infinity.Condition.Children[2].Value == 50, "Infinity recipe combines A, B and camera X threshold", checks);
+                Require(window.CheckScript(), "Compound trigger and figure-eight editor source compiles", checks);
+                Require(window.TestEditorKindTransitions(), "Changing motion to a sequence or expression creates editable valid defaults", checks);
+                Require(window.TestInvalidVisualFieldSwitch(), "Invalid numeric visual edits stay visible until corrected", checks);
+                WaitForValidation(window);
+                int validationCount = window.AutomaticValidationCount;
+                for (int edit = 0; edit < 30; ++edit) window.Source = "main {} // edit " + edit.ToString(CultureInfo.InvariantCulture);
+                WaitForValidation(window);
+                Require(window.AutomaticValidationCount == validationCount + 1, "Rapid edits are debounced into one background compilation", checks);
+                window.LiveApplyEnabled = true;
+                window.Source = "main { add_val(LX, 12); }";
+                WaitForValidation(window);
+                Require(!window.CaptureRunning && window.CompilationMessage.Contains("Valid"), "Live apply can validate in the editor without starting capture", checks);
+                window.Source = "main { set_val(SOUTH, ); }";
+                WaitForValidation(window);
+                Require(window.CompilationMessage.Contains("Line") && !window.CaptureRunning, "Automatic validation reports errors without starting capture", checks);
+                window.LiveApplyEnabled = false;
+                window.Source = document.BuildSource();
                 string valid = window.Source;
                 window.Source = "main { set_val(SOUTH, ); }";
                 Require(!window.CheckScript(), "Invalid script produces compiler diagnostic", checks);
@@ -135,6 +169,10 @@ namespace GamePadRemapper
                 ScriptStorage.Write(file, valid + "\n// saved atomically\n");
                 Require(File.ReadAllText(file).EndsWith("// saved atomically\n", StringComparison.Ordinal), "Atomic save writes new version", checks);
                 Require(File.ReadAllText(file + ".bak") == valid, "Atomic save preserves previous version", checks);
+                string draft = Path.Combine(temporary, "draft.igc");
+                ScriptStorage.WriteDraft(draft, "main {} // draft one");
+                ScriptStorage.WriteDraft(draft, "main {} // draft two");
+                Require(File.ReadAllText(draft).Contains("draft two") && !File.Exists(draft + ".bak"), "Draft recovery is atomic and does not create backup accumulation", checks);
                 window.OpenPath(file);
                 Require(!window.IsDirty, "Opening a saved script clears dirty state", checks);
                 window.Source += "\n// edited\n";
@@ -149,10 +187,13 @@ namespace GamePadRemapper
                     window.ShowVisual();
                     Render(window, Path.Combine(renderDirectory, "visual-editor.png"));
                     window.ScrollToMacros();
+                    window.PrepareMacroPreview();
                     Render(window, Path.Combine(renderDirectory, "macro-editor.png"));
                     window.Width = 1140;
                     window.Height = 760;
                     Render(window, Path.Combine(renderDirectory, "compact-layout.png"));
+                    string staleError = Path.Combine(renderDirectory, "render-error.txt");
+                    if (File.Exists(staleError)) File.Delete(staleError);
                     checks.Add("Rendered actual WPF code, visual and compact windows");
                 }
                 passed = true;
@@ -184,6 +225,7 @@ namespace GamePadRemapper
             var macro = new VisualMacro { Name = "Quick_sequence", Trigger = "LB", Enabled = true };
             macro.Steps.Add(new VisualMacroStep { Control = "SOUTH", Value = 100, DurationMilliseconds = 90 });
             macro.Steps.Add(new VisualMacroStep { Control = "SOUTH", Value = 0, DurationMilliseconds = 60 });
+            visual.Macros.Add(VisualDocument.CreateFigureEightPreset());
             visual.Macros.Add(macro);
             return visual.BuildSource();
         }
@@ -221,6 +263,18 @@ namespace GamePadRemapper
             var frame = new DispatcherFrame();
             Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() => frame.Continue = false));
             Dispatcher.PushFrame(frame);
+        }
+
+        private static void WaitForValidation(MainWindow window)
+        {
+            var frame = new DispatcherFrame();
+            var deadline = Stopwatch.StartNew();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+            timer.Tick += (sender, args) => { if (window.AcceptedValidationVersion == window.CurrentValidationVersion || deadline.ElapsedMilliseconds > 8000) frame.Continue = false; };
+            timer.Start();
+            Dispatcher.PushFrame(frame);
+            timer.Stop();
+            if (window.AcceptedValidationVersion != window.CurrentValidationVersion) throw new TimeoutException("Debounced validation did not complete.");
         }
 
         private static void Render(MainWindow window, string path)

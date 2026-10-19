@@ -16,6 +16,7 @@ namespace GamePadRemapper
         public uint Key, Family;
         public string Name = "", Token = "", Diagnostic = "";
         public int[] Values = new int[256];
+        public int[] OutputValues = new int[256];
         public bool[] Available = new bool[256];
         public string[] Controls = ControlsNames;
         private static readonly string[] ControlsNames = GamePadRemapper.Core.Controls.Names;
@@ -79,6 +80,7 @@ namespace GamePadRemapper
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 384)] public string Diagnostic;
             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public int[] Values;
             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public byte[] Available;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public int[] OutputValues;
         }
         [DllImport(NativeDll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         private static extern uint GR_Probe(StringBuilder text, uint characters);
@@ -157,11 +159,29 @@ namespace GamePadRemapper
             }
         }
 
+        // Live editing may replace an existing session, never start one. The
+        // state check and update share the lifecycle gate with Stop/Inject.
+        public bool TryUpdate(ScriptProgram program)
+        {
+            if (program == null) throw new ArgumentNullException("program");
+            lock (gate)
+            {
+                if (disposed) throw new ObjectDisposedException("RemapperService");
+                if (!started || GetNativeSnapshot().Running == 0) return false;
+                WarmRuntime();
+                Interlocked.Exchange(ref pending, new ProgramSlot(program));
+                Interlocked.Exchange(ref callbackError, "");
+                GR_Wake();
+                return true;
+            }
+        }
+
         private static NativeSnapshot GetNativeSnapshot()
         {
             var snapshot = new NativeSnapshot { Size = (uint)Marshal.SizeOf(typeof(NativeSnapshot)) };
             uint error = GR_GetSnapshot(ref snapshot);
             if (error != 0) throw new Win32Exception((int)error, "Read remapper status");
+            if (snapshot.Version != 2) throw new Win32Exception(1306, "The native bridge version does not match this app. Extract all files from the same release.");
             return snapshot;
         }
 
@@ -188,7 +208,7 @@ namespace GamePadRemapper
                         var device = new NativeDevice { Size = (uint)Marshal.SizeOf(typeof(NativeDevice)) };
                         if (GR_GetDevice(i, ref device) != 0) break;
                         var visible = new ServiceDevice { Key = device.Key, Family = device.Family,
-                            Name = device.Name ?? "Controller", Token = device.Token ?? "", Diagnostic = device.Diagnostic ?? "", Values = device.Values };
+                            Name = device.Name ?? "Controller", Token = device.Token ?? "", Diagnostic = device.Diagnostic ?? "", Values = device.Values, OutputValues = device.OutputValues };
                         for (int slot = 0; slot < 256; ++slot) visible.Available[slot] = device.Available[slot] != 0;
                         devices.Add(visible);
                     }
@@ -246,7 +266,9 @@ namespace GamePadRemapper
             bool passed = false;
             string failure = "";
             ServiceSnapshot active = null, swapped = null, faulted = null, stopped = null;
-            bool invalidPreserved = false, reinjected = false, initialCaptureActive = false;
+            bool invalidPreserved = false, reinjected = false, initialCaptureActive = false, stoppedUpdateRejected = false;
+            bool gipPattern = false, hidPattern = false, quietScheduled = false, quietStopped = false;
+            var gipPoints = new HashSet<int>(); var hidPoints = new HashSet<int>();
             double cpuSeconds = 0; long privateBytes = 0; int collections = 0;
             var watch = Stopwatch.StartNew();
             try
@@ -269,30 +291,79 @@ namespace GamePadRemapper
                     TimeSpan cpuBefore = process.TotalProcessorTime; int gcBefore = GC.CollectionCount(0);
                     service.Inject(script); initialCaptureActive = service.IsRunning;
                     var stage = Stopwatch.StartNew();
-                    while (stage.Elapsed.TotalSeconds < seconds) { Thread.Sleep(50); active = service.GetSnapshot(); }
+                    while (stage.Elapsed.TotalSeconds < 4) { Thread.Sleep(50); active = service.GetSnapshot(); }
                     if (active == null || !active.Running || active.Received == 0 || active.Changed == 0 || active.TimerOutputs == 0 || active.Faults != 0)
                         throw new InvalidOperationException("The live fixture did not establish physical remapping and scheduled output.");
                     try { ScriptCompiler.Compile("main {"); }
                     catch (ScriptException) { invalidPreserved = service.IsRunning; }
-                    service.Inject(ScriptCompiler.Compile("main { set_val(LX,-get_ival(LX)); set_val(AXIS_1,-get_ival(AXIS_1)); }"));
-                    Thread.Sleep(1200); swapped = service.GetSnapshot();
-                    if (!swapped.Running || swapped.Faults != 0) throw new InvalidOperationException("Replacing the compiled configuration stopped capture.");
+                    var visual = VisualDocument.Parse("main { }");
+                    visual.Macros.Add(VisualDocument.CreateFigureEightPreset());
+                    var hid = VisualDocument.CreateFigureEightPreset(); hid.Name = "HidEight";
+                    hid.Pattern.TargetX = "AXIS_1"; hid.Pattern.TargetY = "AXIS_2";
+                    hid.Condition = new VisualCondition { Kind = VisualConditionKind.All, Children = new List<VisualCondition> {
+                        new VisualCondition { Kind = VisualConditionKind.Held, Control = "BUTTON_1" },
+                        new VisualCondition { Kind = VisualConditionKind.Held, Control = "BUTTON_2" } } };
+                    visual.Macros.Add(hid);
+                    var complex = ScriptCompiler.Compile(visual.BuildSource());
+                    if (!service.TryUpdate(complex)) throw new InvalidOperationException("Live update rejected a running capture.");
+                    ServiceSnapshot previous = null; long stableFrom = 0;
+                    stage.Restart();
+                    while (stage.Elapsed.TotalSeconds < Math.Max(12, seconds - 4))
+                    {
+                        Thread.Sleep(40); swapped = service.GetSnapshot();
+                        if (!swapped.Running || swapped.Faults != 0) throw new InvalidOperationException("The compound pattern stopped capture: " + swapped.Error);
+                        bool anyActive = false, allRestored = true;
+                        foreach (var device in swapped.Devices)
+                        {
+                            bool gip = device.Family == 6, rawHid = device.Family == 3;
+                            if (!gip && !rawHid) continue;
+                            int x = gip ? 0 : 96, y = gip ? 1 : 97;
+                            bool triggered = gip ? device.Values[10] > 0 && device.Values[11] > 0 && device.Values[2] > 50 : device.Values[32] > 0 && device.Values[33] > 0;
+                            anyActive |= triggered;
+                            int ox = device.OutputValues[x], oy = device.OutputValues[y];
+                            if (triggered)
+                            {
+                                if (Math.Abs(ox - device.Values[x]) > 25 || Math.Abs(oy - device.Values[y]) > 25)
+                                    throw new InvalidOperationException("An additive pattern drifted from its physical center.");
+                                if (ox != device.Values[x] || oy != device.Values[y])
+                                {
+                                    if (gip) { gipPattern = true; gipPoints.Add((ox + 100) * 201 + oy + 100); }
+                                    else { hidPattern = true; hidPoints.Add((ox + 100) * 201 + oy + 100); }
+                                }
+                            }
+                            allRestored &= ox == device.Values[x] && oy == device.Values[y];
+                        }
+                        if (previous == null || previous.Received != swapped.Received) stableFrom = stage.ElapsedMilliseconds;
+                        else if (stage.ElapsedMilliseconds - stableFrom > 180)
+                        {
+                            if (anyActive && swapped.TimerOutputs > previous.TimerOutputs) quietScheduled = true;
+                            if (!anyActive && allRestored && swapped.TimerOutputs == previous.TimerOutputs) quietStopped = true;
+                        }
+                        previous = swapped;
+                    }
+                    if (!gipPattern || !hidPattern || gipPoints.Count < 5 || hidPoints.Count < 5 || !quietScheduled || !quietStopped)
+                        throw new InvalidOperationException("The live pipeline did not demonstrate both additive patterns, quiet scheduling and restoration after the condition ceased.");
                     service.Inject(ScriptCompiler.Compile("int divisor; main { set_val(LX,100/divisor); }"));
                     stage.Restart();
                     do { Thread.Sleep(40); faulted = service.GetSnapshot(); } while (faulted.Running && stage.ElapsedMilliseconds < 3000);
                     if (faulted.Running || faulted.Faults == 0 || faulted.Error.Length == 0)
                         throw new InvalidOperationException("A deliberate runtime error did not stop capture and report its cause.");
+                    stoppedUpdateRejected = !service.TryUpdate(complex) && !service.IsRunning;
                     service.Inject(ScriptCompiler.Compile("main { }"));Thread.Sleep(900);reinjected = service.IsRunning;
                     service.Stop();stopped = service.GetSnapshot();
+                    stoppedUpdateRejected &= !service.TryUpdate(complex) && !service.IsRunning;
                     cpuSeconds = (process.TotalProcessorTime - cpuBefore).TotalSeconds;
                     process.Refresh();privateBytes = process.PrivateMemorySize64;collections = GC.CollectionCount(0) - gcBefore;
-                    passed = initialCaptureActive && invalidPreserved && reinjected && !stopped.Running && stopped.Faults == 0;
+                    passed = initialCaptureActive && invalidPreserved && reinjected && stoppedUpdateRejected && !stopped.Running && stopped.Faults == 0;
                 }
             }
             catch (Exception error) { failure = error.ToString(); }
             string path = Path.GetFullPath(outputPath);Directory.CreateDirectory(Path.GetDirectoryName(path));
             var report = new { Passed = passed, Error = failure, InitialCaptureActive = initialCaptureActive,
                 InvalidSourcePreservedCapture = invalidPreserved, ReinjectAfterFault = reinjected,
+                LiveUpdateCannotRestartCapture = stoppedUpdateRejected, GipAdditiveFigureEight = gipPattern, HidAdditiveFigureEight = hidPattern,
+                GipDistinctPatternPoints = gipPoints.Count, HidDistinctPatternPoints = hidPoints.Count,
+                ScheduledDuringQuietInput = quietScheduled, RestoredAndIdleWhenConditionCeases = quietStopped,
                 Active = active, Swapped = swapped, Faulted = faulted, Stopped = stopped,
                 ElapsedSeconds = watch.Elapsed.TotalSeconds, ProcessCpuSeconds = cpuSeconds,
                 PrivateBytes = privateBytes, Gen0Collections = collections,

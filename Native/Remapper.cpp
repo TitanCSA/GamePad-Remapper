@@ -36,7 +36,7 @@ std::wstring Explain(DWORD error) {
     case IC_ERROR_TRIAL_EXPIRED:
         return L"The Interceptor two-hour demo has expired for this Windows boot. Restart Windows to begin a new trial session.";
     case ERROR_BUSY:case ERROR_SHARING_VIOLATION:
-        return L"Another application owns an Interceptor capture. Stop its capture and inject again.";
+        return L"The capture or controller output queue is busy. Stop other capture applications; if this happened while forwarding, increase the macro tick interval.";
     case ERROR_NOT_SUPPORTED:case ERROR_REVISION_MISMATCH:
         return L"The installed Interceptor edition or ABI does not match GamePad Remapper. Install the bundled Gamepad Controller edition.";
     case ERROR_SUCCESS_REBOOT_REQUIRED:
@@ -100,6 +100,7 @@ class Service {
     std::uint64_t received_=0,forwarded_=0,changed_=0,timerOutputs_=0,faults_=0,measured_=0;
     double processingUs_=0;
     Time lastPublish_=Time::min();
+    bool snapshotDirty_=false;
     Time armedDeadline_=Time::max();
     bool preciseTimer_=true;
     static void CALLBACK Timer(PTP_CALLBACK_INSTANCE,void* context,PTP_WAIT,TP_WAIT_RESULT) noexcept {
@@ -110,20 +111,21 @@ class Service {
         try{(void)callback_(source.key,source.family,source.physical.data(),source.available.data(),source.output.data(),3,user_);}catch(...){}
     }
     void Publish(bool force=false) {
-        const auto now=Clock::now();if(!force&&now-lastPublish_<std::chrono::milliseconds(100))return;
+        const auto now=Clock::now();if(!force&&(!snapshotDirty_||now-lastPublish_<std::chrono::milliseconds(100)))return;
         std::vector<GR_Device> devices;devices.reserve(sources_.size());
         for(const auto& entry:sources_) {
             const auto& source=*entry.second;GR_Device device{};device.size=sizeof(device);device.key=source.key;device.family=source.family;
             Text(device.name,source.name);Text(device.token,Wide(source.token));Text(device.diagnostic,source.diagnostic);
             std::copy(source.physical.begin(),source.physical.end(),device.values);std::copy(source.available.begin(),source.available.end(),device.available);
+            std::copy(source.output.begin(),source.output.end(),device.output_values);
             devices.push_back(device);
         }
         std::sort(devices.begin(),devices.end(),[](const auto& a,const auto& b){return a.key<b.key;});
-        std::lock_guard<std::mutex> lock(publishedMutex_);snapshot_.size=sizeof(snapshot_);snapshot_.version=1;snapshot_.running=!stopping_.load()&&error_.empty();
+        std::lock_guard<std::mutex> lock(publishedMutex_);snapshot_.size=sizeof(snapshot_);snapshot_.version=2;snapshot_.running=!stopping_.load()&&error_.empty();
         snapshot_.device_count=static_cast<std::uint32_t>(devices.size());snapshot_.received=received_;snapshot_.forwarded=forwarded_;
         snapshot_.changed=changed_;snapshot_.timer_outputs=timerOutputs_;snapshot_.faults=faults_;
         snapshot_.processing_microseconds=measured_?processingUs_/static_cast<double>(measured_):0;
-        Text(snapshot_.status,status_);Text(snapshot_.error,error_);deviceSnapshot_=std::move(devices);lastPublish_=now;
+        Text(snapshot_.status,status_);Text(snapshot_.error,error_);deviceSnapshot_=std::move(devices);lastPublish_=now;snapshotDirty_=false;
     }
     Source& GetSource(const Input_Event& input) {
         const auto family=static_cast<unsigned>(input.type);const auto key=Remapper::SourceKey(family,input.device);
@@ -185,6 +187,7 @@ class Service {
         }
     }
     bool Execute(Source& source,unsigned flags) {
+        snapshotDirty_=true;
         source.output=source.physical;
         const int next=callback_(source.key,source.family,source.physical.data(),source.available.data(),source.output.data(),flags,user_);
         if(next<0){source.output=source.physical;return false;}
@@ -231,7 +234,11 @@ class Service {
         }
     }
     void ArmTimer() {
-        auto earliest=Time::max();for(const auto& item:sources_)earliest=std::min(earliest,item.second->deadline);
+        // Publish the final state even if a release stops all script timers and
+        // the controller subsequently sends no reports. This one-shot wake is
+        // removed as soon as the detached UI snapshot has caught up.
+        auto earliest=snapshotDirty_?lastPublish_+std::chrono::milliseconds(100):Time::max();
+        for(const auto& item:sources_)earliest=std::min(earliest,item.second->deadline);
         if(earliest==armedDeadline_)return;
         armedDeadline_=earliest;
         if(earliest==Time::max()){CancelWaitableTimer(timer_);SetThreadpoolWait(timerWait_,nullptr,nullptr);return;}
@@ -261,7 +268,7 @@ class Service {
                     if(!Execute(source,1))throw std::runtime_error("The script runtime failed during a scheduled macro. Capture has stopped.");
                     SendScheduled(source);
                 }
-                ArmTimer();Publish();
+                Publish();ArmTimer();
                 bool scriptFailed=false;
                 {
                     auto inputs=Get_Input_With_Timeout(INFINITE,wake_);
@@ -286,7 +293,7 @@ class Service {
             }
             status_=L"Stopped · physical input passes through";
         }catch(const std::system_error& error) {
-            ++faults_;error_=Explain(static_cast<DWORD>(error.code().value()))+L" ("+std::to_wstring(error.code().value())+L")";status_=L"Capture stopped · physical input passes through";CompleteStart(static_cast<DWORD>(error.code().value()));
+            ++faults_;error_=Explain(static_cast<DWORD>(error.code().value()))+L" ("+std::to_wstring(error.code().value())+L")\n"+Wide(error.what());status_=L"Capture stopped · physical input passes through";CompleteStart(static_cast<DWORD>(error.code().value()));
         }catch(const std::exception& error) {
             ++faults_;error_=Wide(error.what());status_=L"Script stopped · physical input passes through";CompleteStart(ERROR_GEN_FAILURE);
         }catch(...) {
@@ -338,7 +345,7 @@ void __cdecl GR_Stop(){try{std::lock_guard<std::mutex> lock(apiMutex);if(service
 void __cdecl GR_Wake(){try{std::lock_guard<std::mutex> lock(apiMutex);if(service)service->Wake();}catch(...) {}}
 std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot* snapshot) {
     if(!snapshot||snapshot->size!=sizeof(GR_Snapshot))return ERROR_INVALID_PARAMETER;
-    try {std::lock_guard<std::mutex> lock(apiMutex);if(service)service->Snapshot(*snapshot);else{*snapshot={};snapshot->size=sizeof(*snapshot);snapshot->version=1;Text(snapshot->status,L"Ready · no configuration injected");}return 0;}catch(...){return ERROR_GEN_FAILURE;}
+    try {std::lock_guard<std::mutex> lock(apiMutex);if(service)service->Snapshot(*snapshot);else{*snapshot={};snapshot->size=sizeof(*snapshot);snapshot->version=2;Text(snapshot->status,L"Ready · no configuration injected");}return 0;}catch(...){return ERROR_GEN_FAILURE;}
 }
 std::uint32_t __cdecl GR_GetDevice(std::uint32_t index,GR_Device* device) {
     if(!device||device->size!=sizeof(GR_Device))return ERROR_INVALID_PARAMETER;
