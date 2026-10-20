@@ -238,6 +238,8 @@ struct OperationResult {
     bool Injected = false;
     std::string Source, Error;
     std::shared_ptr<const ScriptProgram> Program;
+    std::filesystem::path Path;
+    ParameterValues Values{};
 };
 class DraftWriter final {
     std::filesystem::path path_;
@@ -328,6 +330,8 @@ class MainWindow final {
     std::unique_ptr<ScriptPanel> parameterPanel_;
     std::shared_ptr<const ScriptProgram> settingsProgram_, activeProgram_;
     ParameterValues parameterValues_{};
+    ParameterValues activeValues_{};
+    std::filesystem::path activePath_;
     std::map<std::string, int> settings_;
     std::string settingsWarning_;
     std::unique_ptr<RemapperService> service_;
@@ -683,10 +687,10 @@ class MainWindow final {
             name += L"  *";
         Draw(dc, name, {S(ex), S(106), S(er - 170), S(135)}, Ink, headingFont_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        const std::wstring state = demo_                ? L"Demo preview"
-                                   : active_.empty()    ? L"Not applied"
-                                   : active_ == source_ ? L"Applied to your controller"
-                                                        : L"Changes waiting to apply";
+        const std::wstring state = demo_              ? L"Demo preview"
+                                   : active_.empty()  ? L"Not applied"
+                                   : ActiveSettings() ? L"Applied to your controller"
+                                                      : L"Changes waiting to apply";
         Draw(dc, state, {S(ex), S(140), S(er), S(160)}, Muted, smallFont_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
         line(ex, 220, er, 221);
@@ -848,10 +852,16 @@ class MainWindow final {
         EnableWindow(parameterPanel_->Handle(), !busy_);
         EnableWindow(controls_[ResetParameters], !busy_ && !schema.Parameters.empty());
     }
+    bool ActiveVersion() const {
+        return activeProgram_ && active_ == source_ && activePath_ == currentPath_;
+    }
+    bool ActiveSettings() const { return ActiveVersion() && activeValues_ == parameterValues_; }
     void ParametersChanged() {
         settingsDirty_ = true;
-        const bool applied = !busy_ && active_ == source_ && service_ && activeProgram_ &&
+        const bool applied = !busy_ && ActiveVersion() && service_ &&
                              service_->SetParameters(activeProgram_, parameterValues_);
+        if (applied)
+            activeValues_ = parameterValues_;
         status_ = applied                ? "Settings updated live - macros keep running"
                   : currentPath_.empty() ? "Settings ready - save the script to remember them"
                                          : "Settings ready - apply the script to use them";
@@ -1883,12 +1893,15 @@ class MainWindow final {
             operation_.join();
         Busy(true);
         const auto text = source_;
+        const auto path = currentPath_;
         const auto values = parameterValues_;
-        operation_ = std::thread([this, inject, program = std::move(program), text, values] {
+        operation_ = std::thread([this, inject, program = std::move(program), text, path, values] {
             auto result = std::make_unique<OperationResult>();
             result->Injected = inject;
             result->Source = text;
             result->Program = program;
+            result->Path = path;
+            result->Values = values;
             try {
                 if (inject)
                     service_->Inject(program, values);
@@ -1942,13 +1955,15 @@ class MainWindow final {
             error_.clear();
             bool applied = false;
             if (!demo_ && !busy_ && service_ &&
-                SendMessageW(controls_[Live], BM_GETCHECK, 0, 0) == BST_CHECKED && active_ != source_)
+                SendMessageW(controls_[Live], BM_GETCHECK, 0, 0) == BST_CHECKED && !ActiveVersion())
                 applied = service_->TryUpdate(result->Program, parameterValues_);
             if (applied) {
                 active_ = source_;
                 activeProgram_ = result->Program;
+                activePath_ = currentPath_;
+                activeValues_ = parameterValues_;
             }
-            const bool active = service_ && service_->IsRunning() && active_ == source_;
+            const bool active = service_ && service_->IsRunning() && ActiveSettings();
             status_ = demo_     ? "Demo preview - no controller connected"
                       : applied ? "✓ Live changes applied"
                       : active  ? "✓ This version is active"
@@ -1972,8 +1987,11 @@ class MainWindow final {
             return;
         const bool wasActive = !active_.empty();
         snapshot_ = service_->GetSnapshot();
-        if (!snapshot_.Running)
+        if (!snapshot_.Running) {
             active_.clear();
+            activeProgram_.reset();
+            activePath_.clear();
+        }
         EnableWindow(controls_[Stop], snapshot_.Running);
         // A slow health refresh is independent of event-driven input display.
         SetTimer(window_, 1, 1000, nullptr);
@@ -2429,6 +2447,8 @@ class MainWindow final {
             if (result->Error.empty()) {
                 active_ = result->Injected ? result->Source : std::string{};
                 activeProgram_ = result->Injected ? result->Program : nullptr;
+                activePath_ = result->Injected ? result->Path : std::filesystem::path{};
+                activeValues_ = result->Values;
                 error_.clear();
                 status_ = result->Injected ? "✓ Configuration applied atomically"
                                            : "Session stopped · normal input restored";
@@ -3054,6 +3074,20 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
         parameterValues_[0] == 63 && parameterValues_[1] == 0 && parameterValues_[2] == 42 &&
             parameterValues_[3] == 175,
         "Per-script settings survive file switches and reloads independently from exact source text");
+    active_ = source_;
+    activeProgram_ = settingsProgram_;
+    activePath_ = currentPath_;
+    activeValues_ = parameterValues_;
+    require(ActiveSettings(), "Matching active script identity and values are shown as applied");
+    activeValues_[0] = 12;
+    require(ActiveVersion() && !ActiveSettings(),
+            "Reloaded values that differ from the running settings remain waiting to apply");
+    activePath_ = directory / L"other-copy.igc";
+    require(!ActiveVersion() && !ActiveSettings(),
+            "Two identical source files remain distinct active configurations");
+    active_.clear();
+    activeProgram_.reset();
+    activePath_.clear();
     auto configured = settingsProgram_->CreateInstance();
     configured->SetParameters(parameterValues_);
     ControlFrame configuredFrame;

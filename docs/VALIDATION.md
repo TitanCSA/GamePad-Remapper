@@ -1,6 +1,6 @@
 # Validation
 
-## 2.2.0 script-defined interfaces
+## 2.2.1 script-defined interfaces
 
 Separate Use/Edit workspaces and the `ui` compiler/runtime additions are tested
 with seven offline CTest suites and the native UI self-test in optimized Release
@@ -20,6 +20,8 @@ required. Results are recorded in [validation.json](validation.json).
   per-file settings, default reset, corrupted JSON, read-only storage fallback
   and migration, keyboard focus scrolling, compact layouts and 100 panel
   rebuild/DPI cycles with bounded GDI/USER resources.
+- Active configuration checks distinguish identical code in different files
+  and saved values that differ from the currently applied settings.
 - Visual/code roundtrips preserve interface declarations. Quoted `main`,
   `define` and visual-marker text cannot be mistaken for source structure.
 - All ten shipped scripts compile and execute. Existing capture conversion,
@@ -30,7 +32,7 @@ required. Results are recorded in [validation.json](validation.json).
 These are software and native-control tests. They do not install/open a driver,
 create capture, measure physical controller latency or establish universal
 hardware compatibility. The older sections below describe their named releases
-and historical live checks, not fresh physical-device tests for 2.2.0.
+and historical live checks, not fresh physical-device tests for 2.2.1.
 
 ## 2.1.1 controller and display update
 

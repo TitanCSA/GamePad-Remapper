@@ -101,6 +101,12 @@ modify the older active program. **Live apply** in the editor controls code
 replacement, separately from parameter updates. Applying changed code still
 creates fresh per-device VM state, as before.
 
+The active configuration also records its script path and applied values.
+Two files containing identical code can have different saved settings: selecting
+the other file does not silently change the first one's running configuration.
+Reloaded values that differ from the active settings are shown as waiting for
+Apply. Parameter edits update only the matching active file/version.
+
 Settings are automatically saved beside the script as
 `Example.igc.settings.json`, after a 300 ms UI editing pause and before switching
 files or closing. This delay concerns disk persistence only, not the running

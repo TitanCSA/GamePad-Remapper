@@ -1,7 +1,7 @@
 ﻿{
-    "Version":  "2.2.0",
+    "Version":  "2.2.1",
     "Passed":  true,
-    "CreatedUtc":  "2026-10-20T14:51:24.9911432Z",
+    "CreatedUtc":  "2026-10-20T15:02:17.2843809Z",
     "Language":  "C++17",
     "Architecture":  "AMD64",
     "ApplicationCLR":  false,
@@ -40,7 +40,7 @@
                                           },
                                "WidgetChecks":  6046,
                                "WidgetLifetimeCycles":  100,
-                               "UiChecks":  73,
+                               "UiChecks":  76,
                                "ParameterPanelDpiRebuildCycles":  100,
                                "DriverAccess":  false,
                                "CaptureStarted":  false
@@ -69,7 +69,7 @@
                                           },
                                "WidgetChecks":  6046,
                                "WidgetLifetimeCycles":  100,
-                               "UiChecks":  73,
+                               "UiChecks":  76,
                                "ParameterPanelDpiRebuildCycles":  100,
                                "DriverAccess":  false,
                                "CaptureStarted":  false
