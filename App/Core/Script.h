@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace gpr {
 struct ControlFrame {
@@ -26,6 +27,25 @@ namespace detail {
 struct ProgramData;
 }
 class ScriptInstance;
+enum class ParameterKind { Slider, Toggle, Select, Number };
+struct ParameterChoice {
+    int Value = 0;
+    std::string Label;
+};
+struct ScriptParameter {
+    std::string Name, Label, Group, Help, Unit;
+    ParameterKind Kind = ParameterKind::Slider;
+    int Minimum = 0, Maximum = 100, Default = 0, Step = 1;
+    std::vector<ParameterChoice> Choices;
+    bool Accepts(int value) const noexcept;
+};
+using ParameterValues = std::array<int, 64>;
+struct ScriptInterface {
+    std::string Title, Description;
+    std::vector<ScriptParameter> Parameters;
+    ParameterValues Defaults() const noexcept;
+    void Validate(const ParameterValues &values) const;
+};
 class ScriptProgram final {
     std::shared_ptr<const detail::ProgramData> data_;
     explicit ScriptProgram(std::shared_ptr<const detail::ProgramData> data);
@@ -33,6 +53,7 @@ class ScriptProgram final {
 
   public:
     const std::string &Source() const noexcept;
+    const ScriptInterface &Interface() const noexcept;
     std::unique_ptr<ScriptInstance> CreateInstance() const;
 };
 struct ScriptCompiler {
@@ -50,6 +71,8 @@ class ScriptInstance final {
     ScriptInstance &operator=(const ScriptInstance &) = delete;
     void Execute(ControlFrame &frame, std::int64_t nowMicroseconds, int elapsedMilliseconds);
     void Reset();
+    // Only the owning worker changes parameters, between executions.
+    void SetParameters(const ParameterValues &values);
     int NextWakeMilliseconds() const noexcept;
     int InstructionBudget() const noexcept;
     void SetInstructionBudget(int value);

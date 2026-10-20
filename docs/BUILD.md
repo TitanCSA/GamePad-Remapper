@@ -46,3 +46,9 @@ signed-driver installer in `App/.build/dist/`, with SHA-256 checksums. The exact
 driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
+
+The seven CTest suites include the script-interface compiler/VM fixtures and
+concurrent parameter-publication checks. The offline UI test also exercises
+custom controls, sidecar/fallback storage, workspace switching and DPI/resource
+lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
+values and recovery drafts are excluded.

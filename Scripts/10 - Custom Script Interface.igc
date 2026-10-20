@@ -1,0 +1,41 @@
+// Use script: adjust these controls without editing the code.
+// Edit script: add/rename controls in ui and use their names in main/combos.
+// Native XUSB/GIP controls; generic HID users should bind AXIS_n from the monitor.
+ui {
+    title("Everyday controller");
+    description("Adjust the script here. Your settings are remembered separately from its code.");
+
+    group("Sticks");
+    toggle mapping_enabled("Enable stick processing", true);
+    slider stick_deadzone("Inner deadzone", 0, 99, 8, "%");
+    help("Rescales LX and LY after removing the inner deadzone. The deadzone API requires less than 100%.");
+    slider camera_speed("Camera sensitivity", 0, 200, 100, "%");
+    select camera_mode("Camera mode", 0) {
+        0: "Normal";
+        1: "Invert vertical";
+        2: "Invert both axes";
+    };
+
+    group("Rapid fire");
+    toggle rapid_enabled("Enable rapid fire on right bumper", false);
+    number rapid_delay("Pulse duration", 10, 500, 80, 5, " ms");
+    help("Hold RB to pulse SOUTH. Set the pulse duration in milliseconds.");
+}
+
+main {
+    if (mapping_enabled) {
+        if (is_available(LX)) deadzone(LX, stick_deadzone);
+        if (is_available(LY)) deadzone(LY, stick_deadzone);
+        if (is_available(RX)) sensitivity(RX, camera_speed);
+        if (is_available(RY)) sensitivity(RY, camera_speed);
+        if (camera_mode == 1 || camera_mode == 2) invert(RY);
+        if (camera_mode == 2) invert(RX);
+    }
+    if (rapid_enabled && get_ival(RB) && is_available(SOUTH)) combo_run(Rapid);
+    else combo_stop(Rapid);
+}
+
+combo Rapid {
+    set_val(SOUTH, 100); wait(rapid_delay);
+    set_val(SOUTH, 0); wait(rapid_delay);
+}

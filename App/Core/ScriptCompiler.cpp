@@ -108,7 +108,8 @@ int Arithmetic(Op op, int a, int b, const Token &at) {
     case Op::Shr: {
         const unsigned shift = static_cast<unsigned>(b) & 31;
         const auto bits = static_cast<std::uint32_t>(a);
-        return Wrapped(!shift ? bits : (bits >> shift) | (a < 0 ? ~std::uint32_t{0} << (32 - shift) : 0));
+        return Wrapped(!shift ? bits
+                              : (bits >> shift) | (a < 0 ? ~std::uint32_t{0} << (32 - shift) : 0));
     }
     case Op::Eq:
         return a == b;
@@ -226,7 +227,35 @@ class Lexer {
             }
             const auto start = position;
             const int sl = line, sc = column;
-            if (Letter(Point()) || Current() == '_') {
+            if (Current() == '"') {
+                Advance();
+                std::string value;
+                while (Current() != '"') {
+                    if (!Current() || Current() == '\n' || Current() == '\r')
+                        throw ScriptException("Unterminated UI string.", sl, sc);
+                    if (Current() == '\\') {
+                        Advance();
+                        const char c = Current();
+                        if (c != '"' && c != '\\' && c != 'n' && c != 't' && c != 'r')
+                            throw ScriptException(
+                                "UI strings support only \\\\, \\\" , \\n, \\r and \\t escapes.", line,
+                                column);
+                        value += c == 'n' ? '\n' : c == 't' ? '\t' : c == 'r' ? '\r' : c;
+                        Advance();
+                    } else {
+                        const auto p = position;
+                        Advance();
+                        value.append(source, p, position - p);
+                    }
+                    if (value.size() > 1024)
+                        throw ScriptException("A UI string may contain at most 1,024 UTF-8 bytes.", sl,
+                                              sc);
+                }
+                Advance();
+                Token token(value, sl, sc);
+                token.IsString = true;
+                result.push_back(std::move(token));
+            } else if (Letter(Point()) || Current() == '_') {
                 do {
                     Advance();
                 } while (Letter(Point()) || Digit(Point()) || Current() == '_');
@@ -279,9 +308,8 @@ class Lexer {
                     Advance();
                     result.emplace_back(one, sl, sc);
                 } else
-                    throw ScriptException("Unexpected character. Strings, imports and operating-system calls "
-                                          "are not supported.",
-                                          sl, sc);
+                    throw ScriptException(
+                        "Unexpected character. Quoted text is allowed only in ui declarations.", sl, sc);
             }
             if (result.size() > 100000)
                 throw ScriptException("A script may contain at most 100,000 tokens.", sl, sc);
@@ -322,7 +350,7 @@ struct Function {
 };
 struct Symbol {
     int Offset = 0, Size = 0;
-    bool Local = false, Array = false, ReadOnly = false;
+    bool Local = false, Array = false, ReadOnly = false, Parameter = false;
 };
 struct Loop {
     std::vector<int> Breaks, Continues;
@@ -337,6 +365,8 @@ class Compiler {
     std::vector<S> initializers;
     std::vector<Instruction> code;
     std::vector<Loop> loops;
+    ScriptInterface interface_;
+    bool hasInterface_ = false;
     // Flat expressions can contain tens of thousands of nodes before the
     // nesting check rejects them. Arena ownership prevents recursive teardown
     // of their left-associated expression chains on the error path.
@@ -352,13 +382,13 @@ class Compiler {
     const Token &Current() const { return tokens.at(position); }
     Token Next() { return tokens.at(position++); }
     bool Take(const std::string &value) {
-        if (Current().Text != value)
+        if (Current().IsString || Current().Text != value)
             return false;
         ++position;
         return true;
     }
     Token Expect(const std::string &value) {
-        if (Current().Text != value)
+        if (Current().IsString || Current().Text != value)
             Fail(Current(), "Expected '" + value + "', found '" + Current().Text + "'.");
         return Next();
     }
@@ -381,7 +411,7 @@ class Compiler {
     bool Reserved(const std::string &name) const {
         static const std::unordered_set<std::string> keywords{
             "define", "const", "int", "main",  "init",     "combo",  "function", "if",
-            "else",   "while", "for", "break", "continue", "return", "wait"};
+            "else",   "while", "for", "break", "continue", "return", "wait",     "ui"};
         return keywords.count(name) || constants.count(name) || ControlConstant(name) >= 0 ||
                globals.count(name) || functionsByName.count(name) || FindBuiltin(name) >= 0;
     }
@@ -406,6 +436,104 @@ class Compiler {
         if (globalCount > 4096)
             Fail(node->At, "Global storage exceeds 4,096 integers.");
         initializers.push_back(node);
+    }
+    std::string UiString() {
+        if (!Current().IsString)
+            Fail(Current(), "Expected a quoted interface label.");
+        return Next().Text;
+    }
+    void ParseInterface(const Token &at) {
+        if (hasInterface_)
+            Fail(at, "Declare only one ui block per script.");
+        hasInterface_ = true;
+        Expect("{");
+        std::string group;
+        while (!Take("}")) {
+            const auto kind = Identifier();
+            if (kind.Text == "title" || kind.Text == "description" || kind.Text == "group" ||
+                kind.Text == "help") {
+                Expect("(");
+                const auto text = UiString();
+                Expect(")");
+                Expect(";");
+                if (kind.Text == "title")
+                    interface_.Title = text;
+                else if (kind.Text == "description")
+                    interface_.Description = text;
+                else if (kind.Text == "group")
+                    group = text;
+                else {
+                    if (interface_.Parameters.empty())
+                        Fail(kind, "help must follow a parameter.");
+                    interface_.Parameters.back().Help = text;
+                }
+                continue;
+            }
+            ScriptParameter p;
+            if (kind.Text == "slider")
+                p.Kind = ParameterKind::Slider;
+            else if (kind.Text == "toggle")
+                p.Kind = ParameterKind::Toggle;
+            else if (kind.Text == "select")
+                p.Kind = ParameterKind::Select;
+            else if (kind.Text == "number")
+                p.Kind = ParameterKind::Number;
+            else
+                Fail(kind,
+                     "Expected title, description, group, help, slider, toggle, select or number.");
+            const auto name = Identifier();
+            if (Reserved(name.Text))
+                Fail(name, "Duplicate or reserved parameter name '" + name.Text + "'.");
+            if (interface_.Parameters.size() >= 64)
+                Fail(name, "A script interface supports at most 64 parameters.");
+            p.Name = name.Text;
+            p.Group = group;
+            Expect("(");
+            p.Label = UiString();
+            Expect(",");
+            if (p.Label.empty())
+                Fail(name, "Parameter labels cannot be empty.");
+            if (p.Kind == ParameterKind::Slider || p.Kind == ParameterKind::Number) {
+                p.Minimum = Constant(ParseExpression());
+                Expect(",");
+                p.Maximum = Constant(ParseExpression());
+                Expect(",");
+                p.Default = Constant(ParseExpression());
+                if (Take(",")) {
+                    if (!Current().IsString) {
+                        p.Step = Constant(ParseExpression());
+                        if (Take(","))
+                            p.Unit = UiString();
+                    } else
+                        p.Unit = UiString();
+                }
+            } else {
+                p.Default = Constant(ParseExpression());
+                p.Minimum = 0;
+                p.Maximum = 1;
+            }
+            Expect(")");
+            if (p.Kind == ParameterKind::Select) {
+                Expect("{");
+                while (!Take("}")) {
+                    if (p.Choices.size() >= 64)
+                        Fail(Current(), "A selection supports at most 64 choices.");
+                    const auto value = Constant(ParseExpression());
+                    Expect(":");
+                    auto label = UiString();
+                    Expect(";");
+                    if (label.empty() || std::any_of(p.Choices.begin(), p.Choices.end(),
+                                                     [&](const auto &c) { return c.Value == value; }))
+                        Fail(name, "Selection choices need unique values and nonempty labels.");
+                    p.Choices.push_back({value, std::move(label)});
+                }
+            }
+            Expect(";");
+            if (p.Minimum > p.Maximum || p.Step <= 0 || !p.Accepts(p.Default))
+                Fail(name, "Invalid parameter range, positive step, or default value.");
+            globals.emplace(p.Name, Symbol{N(interface_.Parameters), 1, false, false, true, true});
+            interface_.Parameters.push_back(std::move(p));
+        }
     }
     S ParseDeclaration(const Token &at, bool semicolon) {
         auto group = std::make_shared<Statement>(at, "declarations");
@@ -508,8 +636,8 @@ class Compiler {
         return result;
     }
     static int Precedence(const std::string &op) {
-        if (op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=" || op == "&=" ||
-            op == "|=" || op == "^=" || op == "<<=" || op == ">>=")
+        if (op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=" ||
+            op == "&=" || op == "|=" || op == "^=" || op == "<<=" || op == ">>=")
             return 1;
         if (op == "?")
             return 2;
@@ -538,14 +666,16 @@ class Compiler {
     E ParseExpression(int minimum = 1) {
         Enter(Current());
         const auto at = Next();
+        if (at.IsString)
+            Fail(at, "Quoted text is allowed only in ui declarations.");
         E left = nullptr;
         if (at.IsNumber)
             left = MakeExpr(at, "number");
         else if (at.Text == "(") {
             left = ParseExpression();
             Expect(")");
-        } else if (at.Text == "+" || at.Text == "-" || at.Text == "!" || at.Text == "~" || at.Text == "++" ||
-                   at.Text == "--")
+        } else if (at.Text == "+" || at.Text == "-" || at.Text == "!" || at.Text == "~" ||
+                   at.Text == "++" || at.Text == "--")
             left = MakeExpr(at, "unary", ParseExpression(13));
         else if (at.IsIdentifier)
             left = MakeExpr(at, "name");
@@ -587,7 +717,8 @@ class Compiler {
                 ternary->Third = ParseExpression(2);
                 left = ternary;
             } else
-                left = MakeExpr(op, p == 1 ? "assign" : "binary", left, ParseExpression(p == 1 ? p : p + 1));
+                left = MakeExpr(op, p == 1 ? "assign" : "binary", left,
+                                ParseExpression(p == 1 ? p : p + 1));
         }
         Leave();
         return left;
@@ -766,7 +897,8 @@ class Compiler {
         }
         if (kind == "while" || kind == "for") {
             if (n->Initializer && n->Initializer->Kind == "expression" &&
-                n->Initializer->Expression->Kind == "call" && n->Initializer->Expression->At.Text == "wait")
+                n->Initializer->Expression->Kind == "call" &&
+                n->Initializer->Expression->At.Text == "wait")
                 Fail(n->Initializer->Expression->At,
                      "wait(milliseconds) must be a standalone statement directly inside a combo.");
             if (n->Initializer)
@@ -816,11 +948,14 @@ class Compiler {
             CompileExpression(e->Left);
             Emit(Op::LoadArray, s.Offset, s.Size | (s.Local ? 65536 : 0), e->At);
         } else
-            Emit(s.Local ? Op::LoadLocal : Op::Load, s.Offset, 0, e->At);
+            Emit(s.Parameter ? Op::LoadParameter
+                 : s.Local   ? Op::LoadLocal
+                             : Op::Load,
+                 s.Offset, 0, e->At);
     }
     void Store(const E &e, const Symbol &s) {
         if (s.ReadOnly)
-            Fail(e->At, "A constant array cannot be modified.");
+            Fail(e->At, "A constant or UI parameter is read-only in script code.");
         Emit(s.Array   ? Op::StoreArray
              : s.Local ? Op::StoreLocal
                        : Op::Store,
@@ -970,9 +1105,13 @@ class Compiler {
         constants["FALSE"] = constants["false"] = 0;
     }
     std::shared_ptr<const ProgramData> Compile() {
-        while (Current().Text != "<end>") {
+        while (Current().Text != "<end>" || Current().IsString) {
             const auto top = Next();
-            if (top.Text == "define" || top.Text == "const") {
+            if (!top.IsIdentifier)
+                Fail(top, "Expected a declaration, entry block or ui block.");
+            if (top.Text == "ui") {
+                ParseInterface(top);
+            } else if (top.Text == "define" || top.Text == "const") {
                 if (top.Text == "const")
                     Take("int");
                 const auto name = Identifier();
@@ -1054,6 +1193,7 @@ class Compiler {
         }
         auto program = std::make_shared<ProgramData>();
         program->Source = source;
+        program->Interface = std::move(interface_);
         program->GlobalCount = globalCount;
         program->Init = functionsByName.at("init");
         program->Main = functionsByName.at("main");
@@ -1062,15 +1202,20 @@ class Compiler {
             code.clear();
             locals.clear();
             localCount = 0;
-            for (const auto &arg : fn.Parameters)
+            for (const auto &arg : fn.Parameters) {
+                if (Reserved(arg))
+                    Fail(fn.At,
+                         "Function arguments cannot shadow a global or UI parameter: '" + arg + "'.");
                 locals.emplace(arg, Symbol{localCount++, 1, true, false, false});
+            }
             if (fn.Name == "init")
                 for (const auto &declaration : initializers)
                     CompileDeclaration(declaration, false);
             CompileStatement(fn.Body);
             Emit(Op::Push, 0, 0, fn.At);
             Emit(Op::Return, 0, 0, fn.At);
-            program->Blocks.push_back({fn.Name, std::move(code), N(fn.Parameters), localCount, fn.Combo});
+            program->Blocks.push_back(
+                {fn.Name, std::move(code), N(fn.Parameters), localCount, fn.Combo});
         }
         program->ComboBlocks.resize(combosByName.size());
         for (const auto &item : combosByName)
@@ -1095,6 +1240,26 @@ std::shared_ptr<const ProgramData> CompileProgram(const std::string &text) {
 namespace gpr {
 ScriptProgram::ScriptProgram(std::shared_ptr<const detail::ProgramData> data) : data_(std::move(data)) {}
 const std::string &ScriptProgram::Source() const noexcept { return data_->Source; }
+const ScriptInterface &ScriptProgram::Interface() const noexcept { return data_->Interface; }
+bool ScriptParameter::Accepts(int value) const noexcept {
+    if (Kind == ParameterKind::Select)
+        return std::any_of(Choices.begin(), Choices.end(),
+                           [value](const auto &c) { return c.Value == value; });
+    return value >= Minimum && value <= Maximum && Step > 0 &&
+           (static_cast<std::int64_t>(value) - Minimum) % Step == 0;
+}
+ParameterValues ScriptInterface::Defaults() const noexcept {
+    ParameterValues result{};
+    for (std::size_t i = 0; i < Parameters.size(); ++i)
+        result[i] = Parameters[i].Default;
+    return result;
+}
+void ScriptInterface::Validate(const ParameterValues &values) const {
+    for (std::size_t i = 0; i < Parameters.size(); ++i)
+        if (!Parameters[i].Accepts(values[i]))
+            throw std::invalid_argument("Invalid value for script parameter '" + Parameters[i].Name +
+                                        "'.");
+}
 std::shared_ptr<const ScriptProgram> ScriptCompiler::Compile(const std::string &source) {
     return std::shared_ptr<const ScriptProgram>(new ScriptProgram(detail::CompileProgram(source)));
 }

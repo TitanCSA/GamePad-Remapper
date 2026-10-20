@@ -1,6 +1,8 @@
 #pragma once
 #include <filesystem>
 #include <string>
+#include <map>
+#include "../Core/Script.h"
 
 namespace gpr {
 std::wstring Utf16(const std::string &text);
@@ -13,5 +15,9 @@ struct ScriptStorage final {
     static std::filesystem::path UniquePath(const std::filesystem::path &directory);
     static std::string Read(const std::filesystem::path &path);
     static void Write(const std::filesystem::path &path, const std::string &source, bool backup = true);
+    static std::map<std::string, int> ReadSettings(const std::filesystem::path &script);
+    static std::filesystem::path SettingsFile(const std::filesystem::path &script);
+    static void WriteSettings(const std::filesystem::path &script, const ScriptInterface &schema,
+                              const ParameterValues &values);
 };
 } // namespace gpr

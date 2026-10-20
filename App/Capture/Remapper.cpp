@@ -41,32 +41,38 @@ std::wstring Explain(DWORD error) {
     case ERROR_FILE_NOT_FOUND:
     case ERROR_PATH_NOT_FOUND:
     case ERROR_SERVICE_DOES_NOT_EXIST:
-        return L"Interceptor Gamepad Controller is not installed. Run its UI installer, then restart Windows "
+        return L"Interceptor Gamepad Controller is not installed. Run its UI installer, then restart "
+               L"Windows "
                L"if requested.";
     case ERROR_ACCESS_DENIED:
     case ERROR_PRIVILEGE_NOT_HELD:
-        return L"Administrator rights are required to open the Interceptor control device. Use Inject and "
+        return L"Administrator rights are required to open the Interceptor control device. Use Inject "
+               L"and "
                L"accept the Windows elevation prompt.";
     case IC_ERROR_TRIAL_EXPIRED:
-        return L"The Interceptor two-hour demo has expired for this Windows boot. Restart Windows to begin a "
+        return L"The Interceptor two-hour demo has expired for this Windows boot. Restart Windows to "
+               L"begin a "
                L"new trial session.";
     case ERROR_BUSY:
     case ERROR_SHARING_VIOLATION:
-        return L"The capture or controller output queue is busy. Stop other capture applications; if this "
+        return L"The capture or controller output queue is busy. Stop other capture applications; if "
+               L"this "
                L"happened while forwarding, increase the macro tick interval.";
     case ERROR_NOT_SUPPORTED:
     case ERROR_REVISION_MISMATCH:
         return L"The installed Interceptor edition or ABI does not match GamePad Remapper. Install the "
                L"bundled Gamepad Controller edition.";
     case ERROR_SUCCESS_REBOOT_REQUIRED:
-        return L"Windows must restart to finish associating the controller filters. Restart Windows, then "
+        return L"Windows must restart to finish associating the controller filters. Restart Windows, "
+               L"then "
                L"inject again.";
     case ERROR_OPERATION_ABORTED:
         return L"The driver revoked capture. Input is now passed through. Check the driver demo, device "
                L"connection and diagnostics.";
     case ERROR_DEVICE_NOT_CONNECTED:
     case ERROR_NOT_READY:
-        return L"A controller source became unavailable. Input is passed through. Reconnect it; capture can "
+        return L"A controller source became unavailable. Input is passed through. Reconnect it; capture "
+               L"can "
                L"be injected again.";
     default:
         break;
@@ -92,7 +98,8 @@ DWORD Probe(std::wstring &message) {
             message = Explain(IC_ERROR_TRIAL_EXPIRED);
             return IC_ERROR_TRIAL_EXPIRED;
         }
-        message = L"Interceptor Gamepad Controller is ready. Capture starts only when Inject is selected.";
+        message =
+            L"Interceptor Gamepad Controller is ready. Capture starts only when Inject is selected.";
         return 0;
     } catch (const std::system_error &error) {
         const auto code = static_cast<DWORD>(error.code().value());
@@ -142,7 +149,8 @@ class Service {
     std::vector<GR_Device> deviceSnapshot_;
     std::unordered_map<std::uint64_t, std::unique_ptr<Source>> sources_;
     std::uint32_t nextKey_ = 1;
-    std::uint64_t received_ = 0, forwarded_ = 0, changed_ = 0, timerOutputs_ = 0, faults_ = 0, measured_ = 0;
+    std::uint64_t received_ = 0, forwarded_ = 0, changed_ = 0, timerOutputs_ = 0, faults_ = 0,
+                  measured_ = 0;
     double processingUs_ = 0;
     bool snapshotDirty_ = false;
     Time armedDeadline_ = Time::max();
@@ -179,7 +187,8 @@ class Service {
             std::copy(source.output.begin(), source.output.end(), device.output_values);
             devices.push_back(device);
         }
-        std::sort(devices.begin(), devices.end(), [](const auto &a, const auto &b) { return a.key < b.key; });
+        std::sort(devices.begin(), devices.end(),
+                  [](const auto &a, const auto &b) { return a.key < b.key; });
         std::lock_guard<std::mutex> lock(publishedMutex_);
         snapshot_.size = sizeof(snapshot_);
         snapshot_.version = 2;
@@ -190,7 +199,8 @@ class Service {
         snapshot_.changed = changed_;
         snapshot_.timer_outputs = timerOutputs_;
         snapshot_.faults = faults_;
-        snapshot_.processing_microseconds = measured_ ? processingUs_ / static_cast<double>(measured_) : 0;
+        snapshot_.processing_microseconds =
+            measured_ ? processingUs_ / static_cast<double>(measured_) : 0;
         Text(snapshot_.status, status_);
         Text(snapshot_.error, error_);
         deviceSnapshot_ = std::move(devices);
@@ -201,11 +211,13 @@ class Service {
         const auto family = static_cast<unsigned>(input.type);
         const auto key = Remapper::SourceKey(family, input.device);
         if (sources_.find(key) == sources_.end() && sources_.size() >= 256)
-            throw std::runtime_error("The capture source limit of 256 was exceeded. Capture was released; "
-                                     "physical input passes through.");
+            throw std::runtime_error(
+                "The capture source limit of 256 was exceeded. Capture was released; "
+                "physical input passes through.");
         auto &slot = sources_[key];
-        const std::string fallback =
-            input.device_info ? std::string{} : std::to_string(family) + ":" + std::to_string(input.device);
+        const std::string fallback = input.device_info
+                                         ? std::string{}
+                                         : std::to_string(family) + ":" + std::to_string(input.device);
         const auto &token = input.device_info ? input.device_info->token : fallback;
         if (!slot || slot->token != token) {
             if (slot)
@@ -231,8 +243,8 @@ class Service {
             source->key = nextKey_++;
             source->token = device.token;
             source->name = std::wstring(reinterpret_cast<const wchar_t *>(device.name));
-            source->diagnostic =
-                L"Capture is active. Waiting for the first physical report to expose this source's controls.";
+            source->diagnostic = L"Capture is active. Waiting for the first physical report to expose "
+                                 L"this source's controls.";
             source->reports.reserve(4);
             sources_.emplace(identity, std::move(source));
         }
@@ -261,16 +273,17 @@ class Service {
                 if (slot < 256)
                     report.controls[slot] = 1;
             }
-            const std::vector<Hid_Value> *lists[]{&input.state.axes, &input.state.triggers, &input.state.hats,
-                                                  &input.state.values};
+            const std::vector<Hid_Value> *lists[]{&input.state.axes, &input.state.triggers,
+                                                  &input.state.hats, &input.state.values};
             for (unsigned i = 0; i < 4; ++i)
                 for (const auto &value : *lists[i]) {
                     const auto slot = source.slots.Find(Remapper::Key(value, i + 1));
                     if (slot < 256)
                         report.controls[slot] = 1;
                 }
-            source.diagnostic = L"Descriptor-driven HID: use BUTTON_n, AXIS_n, TRIGGER_n, HAT_n and VALUE_n. "
-                                L"Console face positions are not inferred.";
+            source.diagnostic =
+                L"Descriptor-driven HID: use BUTTON_n, AXIS_n, TRIGGER_n, HAT_n and VALUE_n. "
+                L"Console face positions are not inferred.";
             if (!source.layoutSeeded)
                 source.diagnostic +=
                     L" Descriptor layout could not be preseeded; slot order is local to this capture.";
@@ -279,7 +292,8 @@ class Service {
                                      std::to_wstring(input.decode_error) +
                                      L"); unknown bytes are passed through.";
             if (source.slots.truncated)
-                source.diagnostic += L" Script control limits reached; additional controls remain unchanged.";
+                source.diagnostic +=
+                    L" Script control limits reached; additional controls remain unchanged.";
             if (!input.state.binary_values.empty())
                 source.diagnostic += L" Wide binary fields are preserved unchanged.";
         } else {
@@ -296,7 +310,8 @@ class Service {
             source.diagnostic =
                 gip ? L"Native GIP standard controls; opaque physical report extensions and transport "
                       L"sequencing are retained."
-                    : L"Native XUSB standard controls; unedited fields retain their exact physical values.";
+                    : L"Native XUSB standard controls; unedited fields retain their exact physical "
+                      L"values.";
         }
     }
     template <class T> static void Apply(Source &source, T &input) {
@@ -317,8 +332,8 @@ class Service {
     bool Execute(Source &source, unsigned flags) {
         snapshotDirty_ = true;
         source.output = source.physical;
-        const int next = callback_(source.key, source.family, source.physical.data(), source.available.data(),
-                                   source.output.data(), flags, user_);
+        const int next = callback_(source.key, source.family, source.physical.data(),
+                                   source.available.data(), source.output.data(), flags, user_);
         if (next < 0) {
             source.output = source.physical;
             return false;
@@ -470,13 +485,22 @@ class Service {
                     armedDeadline_ = Time::max();
                 if (reason & 2)
                     RestoreAndReset(true);
+                else if (reason & 4)
+                    for (auto &entry : sources_) {
+                        auto &source = *entry.second;
+                        Remapper::ClearRelative(source.physical, source.relative);
+                        if (!Execute(source, 4))
+                            throw std::runtime_error(
+                                "The script failed after a parameter change; capture stopped.");
+                        SendScheduled(source);
+                    }
                 const auto now = Clock::now();
                 for (auto &entry : sources_)
                     if (entry.second->deadline <= now) {
                         auto &source = *entry.second;
                         if (!Execute(source, 1))
-                            throw std::runtime_error(
-                                "The script runtime failed during a scheduled macro. Capture has stopped.");
+                            throw std::runtime_error("The script runtime failed during a scheduled "
+                                                     "macro. Capture has stopped.");
                         SendScheduled(source);
                     }
                 Publish();
@@ -517,14 +541,16 @@ class Service {
                     }
                 }
                 if (scriptFailed)
-                    throw std::runtime_error("The script runtime failed. The physical report was forwarded "
-                                             "and capture has stopped.");
+                    throw std::runtime_error(
+                        "The script runtime failed. The physical report was forwarded "
+                        "and capture has stopped.");
             }
             status_ = L"Stopped · physical input passes through";
         } catch (const std::system_error &error) {
             startError = static_cast<DWORD>(error.code().value());
             ++faults_;
-            error_ = Explain(startError) + L" (" + std::to_wstring(startError) + L")\n" + Wide(error.what());
+            error_ =
+                Explain(startError) + L" (" + std::to_wstring(startError) + L")\n" + Wide(error.what());
             status_ = L"Capture stopped · physical input passes through";
         } catch (const std::exception &error) {
             ++faults_;
@@ -606,8 +632,8 @@ class Service {
         if (thread_.joinable())
             thread_.join();
     }
-    void Wake() noexcept {
-        reasons_.fetch_or(2, std::memory_order_release);
+    void Wake(unsigned reason = 2) noexcept {
+        reasons_.fetch_or(reason, std::memory_order_release);
         SetEvent(wake_);
     }
     void Snapshot(GR_Snapshot &output) {
@@ -686,6 +712,14 @@ void __cdecl GR_Wake() {
         std::lock_guard<std::mutex> lock(apiMutex);
         if (service)
             service->Wake();
+    } catch (...) {
+    }
+}
+void __cdecl GR_ParametersChanged() {
+    try {
+        std::lock_guard<std::mutex> lock(apiMutex);
+        if (service)
+            service->Wake(4);
     } catch (...) {
     }
 }

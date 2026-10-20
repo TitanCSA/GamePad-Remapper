@@ -87,8 +87,10 @@ int Bounded(I64 value, int minimum, int maximum) noexcept {
 struct ScriptInstance::Impl {
     std::shared_ptr<const detail::ProgramData> program;
     std::vector<int> globals;
+    ParameterValues parameters{};
     std::array<int, 256> previous{}, savedReleaseTime{}, comboBase{};
-    std::array<I64, 256> changedAt{}, blockedUntil{}, lastReleasedAt{}, lastPressedAt{}, betweenPresses{};
+    std::array<I64, 256> changedAt{}, blockedUntil{}, lastReleasedAt{}, lastPressedAt{},
+        betweenPresses{};
     std::array<bool, 256> hasPressed{}, priorPress{}, pressed{}, released{}, previousAvailable{};
     std::array<int, 64> pvars{};
     std::array<bool, 64> hasPvar{};
@@ -106,6 +108,7 @@ struct ScriptInstance::Impl {
     bool initialized = false, timeAware = false, forcedTicks = false;
     explicit Impl(std::shared_ptr<const detail::ProgramData> p)
         : program(std::move(p)), globals(static_cast<std::size_t>(program->GlobalCount)) {
+        parameters = program->Interface.Defaults();
         int maxLocals = 0;
         for (const auto &block : program->Blocks)
             maxLocals = std::max(maxLocals, block.Locals);
@@ -134,8 +137,8 @@ struct ScriptInstance::Impl {
     }
     void Schedule(I64 deadline) noexcept {
         const I64 delta = deadline > now ? deadline - now : 0;
-        const int ms =
-            static_cast<int>(std::min<I64>(INT_MAX, std::max<I64>(1, delta / 1000 + (delta % 1000 != 0))));
+        const int ms = static_cast<int>(
+            std::min<I64>(INT_MAX, std::max<I64>(1, delta / 1000 + (delta % 1000 != 0))));
         if (!nextWake || ms < nextWake)
             nextWake = ms;
     }
@@ -240,16 +243,17 @@ struct ScriptInstance::Impl {
             if (b < 0 || b >= 100)
                 Error("deadzone threshold must be in 0..99.");
             const int original = frame->Values[a], magnitude = SafeAbs(original);
-            const int adjusted =
-                magnitude <= b
-                    ? 0
-                    : static_cast<int>(std::min<I64>(100, static_cast<I64>(magnitude - b) * 100 / (100 - b)));
+            const int adjusted = magnitude <= b
+                                     ? 0
+                                     : static_cast<int>(std::min<I64>(
+                                           100, static_cast<I64>(magnitude - b) * 100 / (100 - b)));
             Set(a, original < 0 ? -adjusted : adjusted);
             if (count == 3) {
                 const int second = Control(c), v = frame->Values[second], m = SafeAbs(v);
-                Set(second, m <= b ? 0
-                                   : (v < 0 ? -1 : 1) * static_cast<int>(std::min<I64>(
-                                                            100, static_cast<I64>(m - b) * 100 / (100 - b))));
+                Set(second,
+                    m <= b ? 0
+                           : (v < 0 ? -1 : 1) * static_cast<int>(std::min<I64>(
+                                                    100, static_cast<I64>(m - b) * 100 / (100 - b))));
             }
             return 0;
         }
@@ -278,7 +282,8 @@ struct ScriptInstance::Impl {
             if (id == 19 || !combo.Running) {
                 combo.Clear();
                 combo.Running = true;
-                combo.Vm.Start(program->ComboBlocks[index], program->Blocks[program->ComboBlocks[index]]);
+                combo.Vm.Start(program->ComboBlocks[index],
+                               program->Blocks[program->ComboBlocks[index]]);
                 combo.Deadline = now;
             }
             return 0;
@@ -416,7 +421,8 @@ struct ScriptInstance::Impl {
         const auto generation = currentCombo ? currentCombo->Generation : 0;
         while (true) {
             if (--remaining < 0)
-                Error("Script instruction budget exceeded. Check loops and recursion; output was restored to "
+                Error("Script instruction budget exceeded. Check loops and recursion; output was "
+                      "restored to "
                       "physical input.");
             const auto &block = program->Blocks[state.Block];
             if (static_cast<unsigned>(state.Pc) >= block.Code.size())
@@ -429,6 +435,9 @@ struct ScriptInstance::Impl {
                 break;
             case Op::Load:
                 Push(state, globals[in.A]);
+                break;
+            case Op::LoadParameter:
+                Push(state, parameters[in.A]);
                 break;
             case Op::Store:
                 globals[in.A] = state.Stack[state.Sp - 1];
@@ -444,8 +453,8 @@ struct ScriptInstance::Impl {
                 if (static_cast<unsigned>(index) >= static_cast<unsigned>(length))
                     Error("Array index " + std::to_string(index) + " is outside 0.." +
                           std::to_string(length - 1) + ".");
-                Push(state,
-                     (in.B & 65536) ? state.Locals[state.LocalBase + in.A + index] : globals[in.A + index]);
+                Push(state, (in.B & 65536) ? state.Locals[state.LocalBase + in.A + index]
+                                           : globals[in.A + index]);
                 break;
             }
             case Op::StoreArray: {
@@ -511,13 +520,15 @@ struct ScriptInstance::Impl {
                 const int start = state.Sp - in.B;
                 if (state.LocalTop + called.Locals > static_cast<int>(state.Locals.size()))
                     Error("Function local storage exceeds the safe limit.");
-                state.Calls[state.Depth++] = {state.Block, state.Pc, state.LocalBase, state.LocalTop, start};
+                state.Calls[state.Depth++] = {state.Block, state.Pc, state.LocalBase, state.LocalTop,
+                                              start};
                 state.LocalBase = state.LocalTop;
                 state.LocalTop += called.Locals;
                 if (called.Locals)
                     std::fill_n(state.Locals.begin() + state.LocalBase, called.Locals, 0);
                 if (in.B)
-                    std::copy_n(state.Stack.begin() + start, in.B, state.Locals.begin() + state.LocalBase);
+                    std::copy_n(state.Stack.begin() + start, in.B,
+                                state.Locals.begin() + state.LocalBase);
                 state.Sp = start;
                 state.Block = in.A;
                 state.Pc = 0;
@@ -670,8 +681,8 @@ struct ScriptInstance::Impl {
                     if (!ran)
                         for (int i = 0; i < 256; ++i)
                             if (combo.HasHeld[i])
-                                frame->Values[i] = Bounded(frame->Values[i] + combo.Offset[i], combo.Lower[i],
-                                                           combo.Upper[i]);
+                                frame->Values[i] = Bounded(frame->Values[i] + combo.Offset[i],
+                                                           combo.Lower[i], combo.Upper[i]);
                     Schedule(combo.Deadline);
                 }
             }
@@ -682,7 +693,8 @@ struct ScriptInstance::Impl {
                 if (blockedUntil[i] > now)
                     Schedule(blockedUntil[i]);
             const int cadence = activeTickMilliseconds ? activeTickMilliseconds : tickMilliseconds;
-            if ((timeAware || forcedTicks || activeTickMilliseconds) && (!nextWake || nextWake > cadence))
+            if ((timeAware || forcedTicks || activeTickMilliseconds) &&
+                (!nextWake || nextWake > cadence))
                 nextWake = cadence;
         } catch (...) {
             frame->CopyPhysicalToOutput();
@@ -701,10 +713,18 @@ ScriptInstance::~ScriptInstance() = default;
 std::unique_ptr<ScriptInstance> ScriptProgram::CreateInstance() const {
     return std::unique_ptr<ScriptInstance>(new ScriptInstance(data_));
 }
-void ScriptInstance::Execute(ControlFrame &frame, std::int64_t nowMicroseconds, int elapsedMilliseconds) {
+void ScriptInstance::Execute(ControlFrame &frame, std::int64_t nowMicroseconds,
+                             int elapsedMilliseconds) {
     impl_->Execute(frame, nowMicroseconds, elapsedMilliseconds);
 }
 void ScriptInstance::Reset() { impl_->Reset(); }
+void ScriptInstance::SetParameters(const ParameterValues &values) {
+    impl_->program->Interface.Validate(values);
+    if (impl_->busy.test_and_set(std::memory_order_acquire))
+        throw std::logic_error("Parameters must be updated between script executions.");
+    impl_->parameters = values;
+    impl_->busy.clear(std::memory_order_release);
+}
 int ScriptInstance::NextWakeMilliseconds() const noexcept { return impl_->nextWake; }
 int ScriptInstance::InstructionBudget() const noexcept {
     return impl_->budget.load(std::memory_order_relaxed);

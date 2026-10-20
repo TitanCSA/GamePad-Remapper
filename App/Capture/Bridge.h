@@ -11,7 +11,8 @@
 #endif
 
 // ABI 2, x64, UTF-16 strings; fixed bounds are part of the ABI.
-// Callback: flags 0=physical, 1=macro deadline, 2=config reset, 3=forget source.
+// Callback: flags 0=physical, 1=macro deadline, 2=config reset, 3=forget source,
+// 4=parameter change (preserves VM state and physical edge history).
 // Return 0 when idle, a positive next deadline in milliseconds, -1 on fault.
 // Available slots alone can be edited. Unknown bytes always retain their source.
 using GR_Callback = int(__cdecl *)(std::uint32_t key, std::uint32_t family, const int *physical,
@@ -36,6 +37,8 @@ GR_API std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters
 GR_API std::uint32_t __cdecl GR_Start(GR_Callback callback, void *user);
 GR_API void __cdecl GR_Stop();
 GR_API void __cdecl GR_Wake();
+// Reevaluate current state after a parameter edit, preserving VM/combos/edges.
+GR_API void __cdecl GR_ParametersChanged();
 GR_API std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot *snapshot);
 GR_API std::uint32_t __cdecl GR_GetDevice(std::uint32_t index, GR_Device *device);
 // UI notification only; no driver access. Attach nullptr before destroying the

@@ -2,7 +2,7 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.1.1'
+$version='2.2.0'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'
@@ -27,7 +27,10 @@ Copy-Item -LiteralPath $application -Destination $folder
 foreach($name in @('LICENSE','README.md','THIRD-PARTY-NOTICES.md','DRIVER-BINARY-LICENSE.txt')){Copy-Item -LiteralPath (Join-Path $root $name) -Destination $folder}
 # Keep the dependency's full MIT license available in binary distributions.
 Copy-Item -LiteralPath (Join-Path $root 'App\ThirdParty\json.LICENSE.MIT') -Destination (Join-Path $folder 'JSON-LICENSE.txt')
-Copy-Item -LiteralPath (Join-Path $root 'Scripts'),(Join-Path $root 'docs') -Destination $folder -Recurse
+$scriptDestination=Join-Path $folder 'Scripts'
+New-Item -ItemType Directory -Path $scriptDestination|Out-Null
+Get-ChildItem -LiteralPath (Join-Path $root 'Scripts') -Filter '*.igc' -File|Copy-Item -Destination $scriptDestination
+Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $folder -Recurse
 Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $folder 'InterceptorSetup.exe')
 Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $dist 'InterceptorSetup.exe') -Force
 $zipPath=Join-Path $dist ('GamePad-Remapper-'+$version+'-win-x64.zip')

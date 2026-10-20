@@ -161,23 +161,23 @@ int main(int argc, char **argv) {
                   "aliases");
         });
         Test("operators arrays functions and wrapping", [] {
-            const auto f =
-                Run("define SIZE=6;const int t[]={2,3,5};int a[SIZE]={1,2,3,4,5,6};main{int n=0;for(int "
-                    "i=0;i<SIZE;i++){if(i==2)continue;n+=a[i];if(i==4)break;}while(n<20)n++;set_val(VALUE_1,"
-                    "n);set_val(VALUE_2,factorial(6));set_val(VALUE_3,t[2]);set_val(VALUE_4,2147483647+1);"
-                    "set_val(VALUE_5,-0x80000000);set_val(VALUE_6,0x80000000/"
-                    "-1);set_val(VALUE_7,0x80000000%-1);set_val(VALUE_8,0x80000000>>31);set_val(VALUE_9,1<<"
-                    "31);set_val(VALUE_10,1<<33);}function factorial(n){return n<=1?1:n*factorial(n-1);}");
+            const auto f = Run(
+                "define SIZE=6;const int t[]={2,3,5};int a[SIZE]={1,2,3,4,5,6};main{int n=0;for(int "
+                "i=0;i<SIZE;i++){if(i==2)continue;n+=a[i];if(i==4)break;}while(n<20)n++;set_val(VALUE_1,"
+                "n);set_val(VALUE_2,factorial(6));set_val(VALUE_3,t[2]);set_val(VALUE_4,2147483647+1);"
+                "set_val(VALUE_5,-0x80000000);set_val(VALUE_6,0x80000000/"
+                "-1);set_val(VALUE_7,0x80000000%-1);set_val(VALUE_8,0x80000000>>31);set_val(VALUE_9,1<<"
+                "31);set_val(VALUE_10,1<<33);}function factorial(n){return n<=1?1:n*factorial(n-1);}");
             const int expected[]{20, 720, 5, INT_MIN, INT_MIN, INT_MIN, 0, -1, INT_MIN, 2};
             for (int i = 0; i < 10; ++i)
                 Check(f.Values[208 + i] == expected[i], "operator/function result " + std::to_string(i));
         });
         Test("assignment ordering and short circuit", [] {
-            const auto f =
-                Run("int count;int list[4];main{int "
-                    "a=2,b=4,x=0;list[x++]=a++;list[x++]+=++b;0&&++count;1||++count;count+=a?7:1/"
-                    "0;set_val(VALUE_1,list[0]);set_val(VALUE_2,list[1]);set_val(VALUE_3,x);set_val(VALUE_4,"
-                    "a);set_val(VALUE_5,count);a<<=2;a|=1;a^=3;a&=12;set_val(VALUE_6,a);}");
+            const auto f = Run(
+                "int count;int list[4];main{int "
+                "a=2,b=4,x=0;list[x++]=a++;list[x++]+=++b;0&&++count;1||++count;count+=a?7:1/"
+                "0;set_val(VALUE_1,list[0]);set_val(VALUE_2,list[1]);set_val(VALUE_3,x);set_val(VALUE_4,"
+                "a);set_val(VALUE_5,count);a<<=2;a|=1;a^=3;a&=12;set_val(VALUE_6,a);}");
             const int e[]{2, 5, 2, 3, 7, 12};
             for (int i = 0; i < 6; ++i)
                 Check(f.Values[208 + i] == e[i], "side effects");
@@ -197,10 +197,11 @@ int main(int argc, char **argv) {
             Check(f.Values[208] == 41, "reset");
         });
         Test("edges timing double tap and invalid clock history", [] {
-            auto vm = ScriptCompiler::Compile(
-                          "main{set_val(VALUE_1,event_press(SOUTH));set_val(VALUE_2,event_release(SOUTH));"
-                          "set_val(VALUE_3,double_tap(SOUTH,250));set_val(VALUE_4,get_ptime(SOUTH));}")
-                          ->CreateInstance();
+            auto vm =
+                ScriptCompiler::Compile(
+                    "main{set_val(VALUE_1,event_press(SOUTH));set_val(VALUE_2,event_release(SOUTH));"
+                    "set_val(VALUE_3,double_tap(SOUTH,250));set_val(VALUE_4,get_ptime(SOUTH));}")
+                    ->CreateInstance();
             auto f = Frame();
             vm->Execute(f, 0, 0);
             f.Physical[10] = 100;
@@ -236,10 +237,11 @@ int main(int argc, char **argv) {
             Check(f.Values[208] == 1, "invalid clock cannot consume real edge");
         });
         Test("combo holds stops additive composition and self restart", [] {
-            auto vm = ScriptCompiler::Compile("main{if(event_press(SOUTH))combo_run(T);}combo "
-                                              "T{add_val(LX,20);add_val(LY,80);add_val(LY,-80);set_val(EAST,"
-                                              "100);wait(20);set_val(EAST,0);wait(10);}")
-                          ->CreateInstance();
+            auto vm =
+                ScriptCompiler::Compile("main{if(event_press(SOUTH))combo_run(T);}combo "
+                                        "T{add_val(LX,20);add_val(LY,80);add_val(LY,-80);set_val(EAST,"
+                                        "100);wait(20);set_val(EAST,0);wait(10);}")
+                    ->CreateInstance();
             auto f = Frame();
             f.Physical[0] = 10;
             f.Physical[1] = 80;
@@ -253,9 +255,10 @@ int main(int argc, char **argv) {
             Check(f.Values[0] == 50 && f.Values[1] == -80, "held offset tracks physical");
             vm->Execute(f, 30000, 20);
             Check(f.Values[0] == 30 && f.Values[11] == 0, "next segment releases old offset");
-            vm = ScriptCompiler::Compile("main{if(event_press(SOUTH))combo_run(Self);}combo "
-                                         "Self{set_val(EAST,100);wait(1);restart();set_val(LX,99);}function "
-                                         "restart(){set_val(LY,combo_restart(Self));}")
+            vm = ScriptCompiler::Compile(
+                     "main{if(event_press(SOUTH))combo_run(Self);}combo "
+                     "Self{set_val(EAST,100);wait(1);restart();set_val(LX,99);}function "
+                     "restart(){set_val(LY,combo_restart(Self));}")
                      ->CreateInstance();
             for (int i = 0; i < 3000; ++i) {
                 vm->Execute(f, i * 1000LL, 1);
@@ -270,12 +273,13 @@ int main(int argc, char **argv) {
                   "self stop cancels continuation");
         });
         Test("math all new functions and full int ranges", [] {
-            const auto f =
-                Run("main{set_val(VALUE_1,sin(90));set_val(VALUE_2,cos(90));set_val(VALUE_3,sin(270,"
-                    "0x80000000));set_val(VALUE_4,atan2(-1,-1));set_val(VALUE_5,lerp(0x80000000,2147483647,"
-                    "50));set_val(VALUE_6,pow(3,5));set_val(VALUE_7,isqrt(99));set_val(VALUE_8,hypot(3,4));"
-                    "set_val(VALUE_9,set_bit(0,31,1));set_val(VALUE_10,get_bit(0x80000000,31));set_val(VALUE_"
-                    "11,abs(0x80000000));set_val(VALUE_12,random(-2147483647,2147483647));}");
+            const auto f = Run(
+                "main{set_val(VALUE_1,sin(90));set_val(VALUE_2,cos(90));set_val(VALUE_3,sin(270,"
+                "0x80000000));set_val(VALUE_4,atan2(-1,-1));set_val(VALUE_5,lerp(0x80000000,2147483647,"
+                "50));set_val(VALUE_6,pow(3,5));set_val(VALUE_7,isqrt(99));set_val(VALUE_8,hypot(3,4));"
+                "set_val(VALUE_9,set_bit(0,31,1));set_val(VALUE_10,get_bit(0x80000000,31));set_val("
+                "VALUE_"
+                "11,abs(0x80000000));set_val(VALUE_12,random(-2147483647,2147483647));}");
             const int e[]{100, 0, INT_MAX, -135, -1, 243, 9, 5, INT_MIN, 1, INT_MAX};
             for (int i = 0; i < 11; ++i)
                 Check(f.Values[208 + i] == e[i], "math result");
@@ -289,10 +293,11 @@ int main(int argc, char **argv) {
             }
         });
         Test("conditional timers long clock phase and bounds", [] {
-            auto vm = ScriptCompiler::Compile(
-                          "main{if(get_ival(SOUTH)){tick(4);set_val(VALUE_1,wave_sin(1000,40));set_val(VALUE_"
-                          "2,wave_cos(1000,30));set_val(VALUE_3,get_phase(1000));}} ")
-                          ->CreateInstance();
+            auto vm =
+                ScriptCompiler::Compile(
+                    "main{if(get_ival(SOUTH)){tick(4);set_val(VALUE_1,wave_sin(1000,40));set_val(VALUE_"
+                    "2,wave_cos(1000,30));set_val(VALUE_3,get_phase(1000));}} ")
+                    ->CreateInstance();
             auto f = Frame();
             vm->Execute(f, 0, 0);
             Check(vm->NextWakeMilliseconds() == 0, "inactive path idle");
@@ -311,23 +316,24 @@ int main(int argc, char **argv) {
             auto f = Frame();
             f.Physical[10] = 100;
             f.Available[21] = false;
-            auto vm = ScriptCompiler::Compile("main{remap(SOUTH,TOUCH);swap(SOUTH,TOUCH);set_val(RX,900);set_"
-                                              "val(LT,-5);set_val(HAT_1,9);}")
-                          ->CreateInstance();
+            auto vm =
+                ScriptCompiler::Compile("main{remap(SOUTH,TOUCH);swap(SOUTH,TOUCH);set_val(RX,900);set_"
+                                        "val(LT,-5);set_val(HAT_1,9);}")
+                    ->CreateInstance();
             vm->Execute(f, 0, 0);
             Check(f.Values[10] == 100 && f.Values[2] == 100 && f.Values[4] == 0 && f.Values[192] == 7,
                   "missing endpoints and bounds");
-            const auto r = Run(
-                "main{set_val(LX,90);add_val(LX,2147483647);set_val(VALUE_1,0x80000000);invert(VALUE_1);}");
+            const auto r = Run("main{set_val(LX,90);add_val(LX,2147483647);set_val(VALUE_1,0x80000000);"
+                               "invert(VALUE_1);}");
             Check(r.Values[0] == 100 && r.Values[208] == INT_MAX, "saturated additions and invert");
         });
         Test("compiler rejects unsafe forms and preserves Unicode", [] {
             for (const auto *source :
                  {"", "main{", "main{}main{}", "main{wait(1);}", "main{break;}", "main{continue;}",
                   "int a[-1]={1};main{}", "function main(a){}", "combo main{wait(1);}",
-                  "main{int a=1;int a=2;}", "main{unknown=3;}", "main{set_val(SOUTH);}", "main{system(1);}",
-                  "main{}combo T{set_val(LX,wait(5));}", "const int a[]={1};main{a[0]=2;}",
-                  "main{for(wait(5);0;){}}"})
+                  "main{int a=1;int a=2;}", "main{unknown=3;}", "main{set_val(SOUTH);}",
+                  "main{system(1);}", "main{}combo T{set_val(LX,wait(5));}",
+                  "const int a[]={1};main{a[0]=2;}", "main{for(wait(5);0;){}}"})
                 CompileError(source);
             const auto f = Run(u8"int κόσμος=7;main{int 漢字=5;set_val(VALUE_1,κόσμος+漢字);}");
             Check(f.Values[208] == 12, "UTF-8 identifiers");
@@ -364,11 +370,12 @@ int main(int argc, char **argv) {
             Check(!failed, "32,000 isolated concurrent frames");
         });
         Test("physical history release duration and missing hats", [] {
-            auto vm = ScriptCompiler::Compile(
-                          "main{set_val(VALUE_1,event_press(HAT_1));set_val(VALUE_2,get_ival(HAT_1));set_val("
-                          "VALUE_3,get_lval(HAT_1));set_val(VALUE_4,is_available(HAT_1));set_val(VALUE_5,get_"
-                          "brtime(SOUTH));set_val(VALUE_6,get_rtime());}")
-                          ->CreateInstance();
+            auto vm =
+                ScriptCompiler::Compile(
+                    "main{set_val(VALUE_1,event_press(HAT_1));set_val(VALUE_2,get_ival(HAT_1));set_val("
+                    "VALUE_3,get_lval(HAT_1));set_val(VALUE_4,is_available(HAT_1));set_val(VALUE_5,get_"
+                    "brtime(SOUTH));set_val(VALUE_6,get_rtime());}")
+                    ->CreateInstance();
             auto f = Frame();
             f.Available[192] = false;
             f.Physical[192] = 0;
@@ -382,8 +389,8 @@ int main(int argc, char **argv) {
             f.Physical[192] = 2;
             f.Physical[10] = 100;
             vm->Execute(f, 100000, 99);
-            Check(f.Values[208] == 1 && f.Values[209] == 2 && f.Values[210] == -1 && f.Values[212] == 100 &&
-                      f.Values[213] == 99,
+            Check(f.Values[208] == 1 && f.Values[209] == 2 && f.Values[210] == -1 &&
+                      f.Values[212] == 100 && f.Values[213] == 99,
                   "hat and saved release duration");
             f.Physical[10] = 0;
             vm->Execute(f, 130000, 30);
@@ -391,11 +398,11 @@ int main(int argc, char **argv) {
             Check(f.Values[212] == 30, "released duration advances");
         });
         Test("combo ordering explicit restart stop loops and cleanup", [] {
-            auto vm =
-                ScriptCompiler::Compile("main{if(event_press(SOUTH))combo_run(T);if(event_press(WEST))combo_"
-                                        "restart(T);if(event_press(NORTH))combo_stop(T);set_val(VALUE_1,"
-                                        "combo_running(T));}combo T{set_val(EAST,100);wait(50);}")
-                    ->CreateInstance();
+            auto vm = ScriptCompiler::Compile(
+                          "main{if(event_press(SOUTH))combo_run(T);if(event_press(WEST))combo_"
+                          "restart(T);if(event_press(NORTH))combo_stop(T);set_val(VALUE_1,"
+                          "combo_running(T));}combo T{set_val(EAST,100);wait(50);}")
+                          ->CreateInstance();
             auto f = Frame();
             f.Physical[10] = 100;
             vm->Execute(f, 0, 0);
@@ -406,13 +413,15 @@ int main(int argc, char **argv) {
             f.Physical[13] = 100;
             vm->Execute(f, 30000, 10);
             Check(f.Values[11] == 0 && vm->NextWakeMilliseconds() == 0, "stop releases");
-            vm = ScriptCompiler::Compile("main{if(event_press(SOUTH)){combo_run(First);combo_run(Second);}}"
-                                         "combo First{set_val(EAST,100);wait(100);}combo "
-                                         "Second{wait(10);combo_stop_all();set_val(LX,99);}")
+            vm = ScriptCompiler::Compile(
+                     "main{if(event_press(SOUTH)){combo_run(First);combo_run(Second);}}"
+                     "combo First{set_val(EAST,100);wait(100);}combo "
+                     "Second{wait(10);combo_stop_all();set_val(LX,99);}")
                      ->CreateInstance();
             vm->Execute(f, 0, 0);
             vm->Execute(f, 10000, 10);
-            Check(vm->NextWakeMilliseconds() == 1 && f.Values[0] == 0, "cross-combo quiet cleanup requested");
+            Check(vm->NextWakeMilliseconds() == 1 && f.Values[0] == 0,
+                  "cross-combo quiet cleanup requested");
             vm->Execute(f, 11000, 1);
             Check(f.Values[11] == 0 && vm->NextWakeMilliseconds() == 0, "cross-combo cleanup goes idle");
             vm = ScriptCompiler::Compile("main{if(event_press(SOUTH))combo_run(Sequence);}function "
@@ -427,15 +436,16 @@ int main(int argc, char **argv) {
         Test("block deadlines scoped ticks and persistent legacy cadence", [] {
             auto f = Frame();
             f.Physical[10] = 100;
-            auto vm =
-                ScriptCompiler::Compile("main{if(event_press(SOUTH))block(SOUTH,5000);}")->CreateInstance();
+            auto vm = ScriptCompiler::Compile("main{if(event_press(SOUTH))block(SOUTH,5000);}")
+                          ->CreateInstance();
             vm->Execute(f, 0, 0);
             Check(f.Values[10] == 0 && vm->NextWakeMilliseconds() == 5000, "block uses one deadline");
             vm->Execute(f, 5000000, 5000);
             Check(f.Values[10] == 100 && vm->NextWakeMilliseconds() == 0,
                   "block expiration restores without polling");
-            vm = ScriptCompiler::Compile("init{vm_tctrl(10);}main{if(get_ival(SOUTH)){tick(10);tick(4);tick("
-                                         "8);get_runtime();if(event_press(SOUTH))block(EAST,2);}}")
+            vm = ScriptCompiler::Compile(
+                     "init{vm_tctrl(10);}main{if(get_ival(SOUTH)){tick(10);tick(4);tick("
+                     "8);get_runtime();if(event_press(SOUTH))block(EAST,2);}}")
                      ->CreateInstance();
             vm->Execute(f, 0, 0);
             Check(vm->NextWakeMilliseconds() == 2, "earlier block deadline wins");
@@ -447,7 +457,8 @@ int main(int argc, char **argv) {
         });
         Test("persistent values deterministic random and native identifiers", [] {
             const auto p = ScriptCompiler::Compile(
-                "main{set_val(VALUE_1,get_pvar(0,0,100,50));set_pvar(0,70);set_val(VALUE_2,rand(-2147483647,"
+                "main{set_val(VALUE_1,get_pvar(0,0,100,50));set_pvar(0,70);set_val(VALUE_2,rand(-"
+                "2147483647,"
                 "2147483647));set_val(VALUE_3,get_controller());set_val(VALUE_4,get_device());}");
             auto a = p->CreateInstance(), b = p->CreateInstance();
             auto f = Frame(), g = Frame();
@@ -488,8 +499,8 @@ int main(int argc, char **argv) {
                                                        : static_cast<int>(random() % 2001) - 1000;
                     std::int64_t expected = f.Physical[control];
                     for (int op = 0; op < 24; ++op)
-                        expected =
-                            std::clamp<std::int64_t>(set[op] ? values[op] : expected + values[op], low, high);
+                        expected = std::clamp<std::int64_t>(set[op] ? values[op] : expected + values[op],
+                                                            low, high);
                     vm->Execute(f, pass * 1000LL, 1);
                     Check(f.Values[control] == expected, "ordered affine vs sequential clamps");
                 }
@@ -507,7 +518,8 @@ int main(int argc, char **argv) {
             Check(f.Values[10] == 0 && f.Values[11] == 100 && f.Values[0] == 50 && f.Values[1] == 40,
                   "remap/deadzone/sensitivity/invert");
             vm = ScriptCompiler::Compile(
-                     "main{add_val(LX,30);add_val(LX,-10);add_val(LY,2147483647);add_val(RX,0x80000000);add_"
+                     "main{add_val(LX,30);add_val(LX,-10);add_val(LY,2147483647);add_val(RX,0x80000000);"
+                     "add_"
                      "val(LT,0x80000000);add_val(VALUE_1,2147483647);add_val(VALUE_2,0x80000000);invert("
                      "VALUE_3);set_val(RY,90);add_val(RY,40);add_val(RY,-50);}")
                      ->CreateInstance();
@@ -524,7 +536,8 @@ int main(int argc, char **argv) {
                       f.Values[3] == 50,
                   "all signed and normalized saturation cases");
             vm->Execute(f, 4000, 4);
-            Check(f.Values[0] == 30 && vm->NextWakeMilliseconds() == 0, "no additive drift or idle polling");
+            Check(f.Values[0] == 30 && vm->NextWakeMilliseconds() == 0,
+                  "no additive drift or idle polling");
         });
         Test("bounded locals arity blocks reserved names and all argument checks", [] {
             const auto f =
@@ -535,8 +548,8 @@ int main(int argc, char **argv) {
                       "42;}main{set_val(VALUE_1,first());}")
                           .Values[208] == 42,
                   "forward zero-local functions");
-            for (const auto *k : {"define", "const", "int", "main", "init", "combo", "function", "if", "else",
-                                  "while", "for", "break", "continue", "return", "wait"}) {
+            for (const auto *k : {"define", "const", "int", "main", "init", "combo", "function", "if",
+                                  "else", "while", "for", "break", "continue", "return", "wait"}) {
                 CompileError("int " + std::string(k) + ";main{}");
                 CompileError("function " + std::string(k) + "(){}main{}");
             }
@@ -549,9 +562,9 @@ int main(int argc, char **argv) {
                 CompileError("main{" + std::string(invalid) + ";}");
             for (const auto *call :
                  {"lerp(0,100,101)", "lerp(0,100,-1)", "tick(21)", "get_phase(-1)", "get_bit(0,32)",
-                  "set_bit(0,0,2)", "get_pvar(64,0,1,0)", "set_pvar(64,1)", "get_pvar(0,1,0,0)", "pow(2,32)",
-                  "isqrt(-1)", "random(1,0)", "deadzone(LX,100)", "sensitivity(LX,1001)", "set_val(256,1)",
-                  "block(LX,-1)"}) {
+                  "set_bit(0,0,2)", "get_pvar(64,0,1,0)", "set_pvar(64,1)", "get_pvar(0,1,0,0)",
+                  "pow(2,32)", "isqrt(-1)", "random(1,0)", "deadzone(LX,100)", "sensitivity(LX,1001)",
+                  "set_val(256,1)", "block(LX,-1)"}) {
                 auto v = Frame();
                 auto vm = ScriptCompiler::Compile("main{" + std::string(call) + ";}")->CreateInstance();
                 bool rejected = false;
@@ -726,13 +739,13 @@ int main(int argc, char **argv) {
                         ++count;
                         Check(true, "shipped script");
                     }
-                Check(count == 9, "nine shipped scripts");
+                Check(count == 10, "ten shipped scripts, including a custom script interface");
             });
         }
-        auto vm =
-            ScriptCompiler::Compile("main{remap(SOUTH,EAST);invert(LY);deadzone(LX,10);sensitivity(RX,80);if("
-                                    "get_ival(LB)){add_val(LX,sin(get_phase(1200)*360/1200,30));tick(4);}}")
-                ->CreateInstance();
+        auto vm = ScriptCompiler::Compile(
+                      "main{remap(SOUTH,EAST);invert(LY);deadzone(LX,10);sensitivity(RX,80);if("
+                      "get_ival(LB)){add_val(LX,sin(get_phase(1200)*360/1200,30));tick(4);}}")
+                      ->CreateInstance();
         auto f = Frame();
         f.Physical[0] = 35;
         f.Physical[1] = -60;

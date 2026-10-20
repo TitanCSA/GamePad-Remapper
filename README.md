@@ -8,17 +8,16 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.1.1 update:** embeds SDK 1.0.4.0, retaining pending HID/XInputHID/XUSB
-collection readers and preserving exact native startup errors. Live state is
-published after forwarding and delivered through coalesced UI notifications;
-the former 100 ms publication and 150 ms monitor intervals are removed.
-Script timing keeps its own deadlines. Includes the complete updated controller
-installer with Microsoft-signed kernel 1.0.2.0, also available separately below
-the portable ZIP in this release.
+**2.2.0:** two workspaces, **Use script** and **Edit script**. Script authors
+declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block;
+players adjust them without touching the code. Settings are remembered per file
+and update a running script without recompilation or resetting its macros.
+Includes SDK 1.0.4.0 and the unchanged controller installer with Microsoft-signed
+kernel 1.0.2.0. [Create a script interface](docs/SCRIPT-INTERFACE.md).
 
-| Write code | Edit visually |
+| Use a script | Edit its code |
 | --- | --- |
-| ![IGC code editor; simulated device preview](docs/images/code-editor.png) | ![Visual remapping and macro editor; simulated device preview](docs/images/visual-editor.png) |
+| ![Script-defined sliders, switch and dropdown; simulated session](docs/images/script-settings.png) | ![IGC code editor; simulated device preview](docs/images/code-editor.png) |
 
 Screenshots show the real native Windows interface with explicitly simulated controller
 activity. Normal use displays actual driver state and never invents devices.
@@ -34,7 +33,14 @@ The interface uses four colors: **blue, black, white and gray**. Consistent
 controls, clear keyboard focus and readable spacing keep the script, visual
 settings and live session easy to distinguish.
 
-## One script, two views
+## Two workspaces, one script
+
+- **Use script:** pick a saved script, adjust its custom settings and apply it.
+  Sliders, switches, selections and numeric fields come directly from its `ui`
+  declaration. Parameter edits apply immediately to the active version, with
+  no Live apply switch required. **Reset settings** restores the author's defaults.
+- **Edit script:** author the behavior and its interface in **Code**, or use
+  the existing **Visual** designer. Switching workspace preserves the same file.
 
 - **Code:** a C-like language with `init`, `main`, variables, arrays, functions,
   conditionals, loops, arithmetic, input events and timed `combo` sequences.
@@ -58,25 +64,58 @@ settings and live session easy to distinguish.
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.1.1-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.2.0-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
 3. Open **`GamePadRemapper.exe`**. Select an example or create a script. Editing
    and compiling work without an installed driver or administrator rights.
-4. Edit in **Code** or **Visual editor**, then choose **Apply script**
-   (**Ctrl+Enter**).
+4. In **Use script**, adjust the settings and choose **Apply script**
+   (**Ctrl+Enter**). Use **Edit script** to change the code or visual rules.
    Approve Windows elevation when requested: the driver restricts capture to
    administrators. Starting a capture does not require moving a controller.
 5. Use **Stop** before another capture application. Closing this app also
    releases capture and restores physical input passthrough.
 
-Your library is stored in `Documents/GamePad Remapper/Scripts`. You can open
+Your library is stored in `Documents/GamePad Remapper/Scripts`. Settings are
+automatically saved in a neighboring `.igc.settings.json` file; keep it with the
+script to carry your values to another folder. Read-only folders use a local
+Windows user-profile fallback. Changing parameters leaves the
+`.igc` code untouched. You can open
 `.igc` files from any folder. Enable **Live apply valid edits** once per session
 to apply subsequent valid changes after a short editing pause. It only updates
 an already-running capture; opening a file or enabling the option never starts
 capture. **Ctrl+S** saves the script; recovery drafts do not replace that file.
+
+## Declare your own settings
+
+```c
+ui {
+    title("My controller");
+    toggle enabled("Enable processing", true);
+    slider zone("Deadzone", 0, 99, 8, "%");
+    select mode("Camera mode", 0) {
+        0: "Normal";
+        1: "Invert vertical";
+    };
+}
+
+main {
+    if (enabled) {
+        deadzone(LX, zone);
+        deadzone(LY, zone);
+        if (mode == 1) invert(RY);
+    }
+}
+```
+
+The **Use script** workspace creates the controls automatically. Their names
+(`enabled`, `zone`, `mode`) are read-only integer values in the script. The
+deadzone builtin accepts `0..99`; other sliders can use `0..100` or another range.
+See the [complete customizable example](Scripts/10%20-%20Custom%20Script%20Interface.igc)
+and [interface reference](docs/SCRIPT-INTERFACE.md) for numeric fields, units,
+groups, help text, saved values and hot-update behavior.
 
 ## Complex behavior without a complex setup
 

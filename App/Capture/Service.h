@@ -29,7 +29,11 @@ class RemapperService final {
     RemapperService(const RemapperService &) = delete;
     RemapperService &operator=(const RemapperService &) = delete;
     void Inject(std::shared_ptr<const ScriptProgram> program);
+    void Inject(std::shared_ptr<const ScriptProgram> program, const ParameterValues &values);
     bool TryUpdate(std::shared_ptr<const ScriptProgram> program);
+    bool TryUpdate(std::shared_ptr<const ScriptProgram> program, const ParameterValues &values);
+    bool SetParameters(const std::shared_ptr<const ScriptProgram> &program,
+                       const ParameterValues &values);
     void Stop();
     bool IsRunning();
     ServiceSnapshot GetSnapshot();

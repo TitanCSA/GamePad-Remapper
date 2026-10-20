@@ -12,7 +12,7 @@ The application compiles each `.igc` file once to immutable bytecode. Each inter
 - `if` / `else`, `while`, `for`, `break`, `continue`, `return`, user `function name(args) { ... }`, and `combo name { ... }`.
 - Arithmetic `+ - * / %`, comparisons, short-circuit `&& ||`, bitwise `& | ^ ~ << >>`, unary `!`, ternary `?:`, assignment and compound assignment, prefix/postfix `++ --`.
 - Integer overflow wraps in two's complement; division truncates toward zero. Shift counts use their low five bits. A zero divisor, invalid array index or invalid function argument faults the script.
-- Decimal and hexadecimal literals; `// line` and `/* block */` comments. Strings, dynamic allocation, classes, pointers, imports, GPC `data(...)` and hardware-specific declarations are unavailable.
+- Decimal and hexadecimal literals; `// line` and `/* block */` comments. Quoted UTF-8 text is supported only in `ui` declarations. Executable strings, dynamic allocation, classes, pointers, imports, GPC `data(...)` and hardware-specific declarations are unavailable.
 
 Lowercase variable names such as `a`, `x` and `y` are valid. Control constants are uppercase. `TRUE`/`FALSE` and `true`/`false` are available. Language keywords and builtin names cannot be redeclared. `main` and `init` must be actual entry blocks, not function or combo names. Array lengths must be positive; only omitted `[]` lengths are inferred from an initializer.
 
@@ -115,6 +115,13 @@ The primitives also allow custom curves, nested state machines, tables and condi
 Limits: 524,288 text characters (the editor also caps UTF-8 files at 1 MiB), 100,000 tokens, 96 syntax/expression nesting, 32,768 compiled instructions, 4,096 global integers, 1,024 elements per array, 256 locals per function, 16 arguments, 32 nested calls, 32 combos, and 1,024 expression-stack values. One frame shares a 10,000 instruction budget across init, main and all combos. `wait` and `block` accept at most 24 hours. A long loop cannot hang the worker; a fault reports its source line/column and restores the frame to physical input. The service stops the faulty script.
 
 ## Code and visual editing
+
+The application separates **Use script** from **Edit script**. Optional `ui`
+declarations define sliders, on/off switches, dropdowns, numeric fields, groups
+and help text in the usage workspace. Their names are read-only integer
+parameters in executable code. Valid parameter changes update running instances
+without recompiling or resetting globals/macros. See
+[Script-defined controls](SCRIPT-INTERFACE.md) for syntax and persistence.
 
 Visual view owns a marked, hashed generated section and one marked call at the end of main. Remaps, axis transforms, disabled rules, editable numeric defines and timed macro steps roundtrip through that section. Existing custom blocks remain in the file and run before the visual overlay. Numeric `define` values in custom code can be edited; their names and references must be renamed in code view.
 

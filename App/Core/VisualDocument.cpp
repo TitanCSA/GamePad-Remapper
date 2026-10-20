@@ -34,7 +34,9 @@ const std::regex IntegerDefines(
 bool Starts(const std::string &text, const std::string_view prefix) {
     return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 }
-bool Space(const char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f'; }
+bool Space(const char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
 std::string Trim(const std::string &text) {
     std::size_t a = 0, b = text.size();
     while (a < b && Space(text[a]))
@@ -61,32 +63,66 @@ void CheckUtf8(const std::string &text) {
                                              static_cast<int>(text.size()), nullptr, 0) == 0)
         Fail("The script contains invalid UTF-8 text.");
 }
-std::string MaskComments(const std::string &source) {
+std::string MaskCode(const std::string &source, bool comments) {
     std::string result = source;
-    bool line = false, block = false;
+    bool line = false, block = false, quoted = false;
     for (std::size_t i = 0; i < source.size(); ++i) {
         const char c = source[i], next = i + 1 < source.size() ? source[i + 1] : '\0';
-        if (!line && !block && c == '/' && next == '/') {
-            line = true;
+        if (quoted) {
             result[i] = ' ';
+            if (c == '\\' && next) {
+                result[++i] = ' ';
+                continue;
+            }
+            if (c == '"')
+                quoted = false;
+        } else if (!line && !block && c == '"') {
+            quoted = true;
+            result[i] = ' ';
+        } else if (!line && !block && c == '/' && next == '/') {
+            line = true;
+            if (comments)
+                result[i] = ' ';
         } else if (!line && !block && c == '/' && next == '*') {
             block = true;
-            result[i] = ' ';
+            if (comments)
+                result[i] = ' ';
         } else if (line) {
             if (c == '\r' || c == '\n')
                 line = false;
-            else
+            else if (comments)
                 result[i] = ' ';
         } else if (block) {
             if (c == '*' && next == '/') {
-                result[i] = result[i + 1] = ' ';
+                if (comments)
+                    result[i] = result[i + 1] = ' ';
                 ++i;
                 block = false;
-            } else if (c != '\r' && c != '\n')
+            } else if (comments && c != '\r' && c != '\n')
                 result[i] = ' ';
         }
     }
     return result;
+}
+std::string MaskComments(const std::string &source) { return MaskCode(source, true); }
+void ReplaceOutsideStrings(std::string &text, std::string_view before, std::string_view after) {
+    const auto masked = MaskCode(text, false);
+    std::vector<std::size_t> positions;
+    for (std::size_t at = 0; (at = masked.find(before, at)) != std::string::npos; at += before.size())
+        positions.push_back(at);
+    for (auto it = positions.rbegin(); it != positions.rend(); ++it)
+        text.replace(*it, before.size(), after);
+}
+std::string RemoveOutsideStrings(std::string text, const std::regex &pattern) {
+    const auto masked = MaskCode(text, false);
+    std::vector<std::pair<std::size_t, std::size_t>> matches;
+    for (auto it = std::sregex_iterator(masked.begin(), masked.end(), pattern);
+         it != std::sregex_iterator(); ++it)
+        matches.emplace_back(static_cast<std::size_t>(it->position()),
+                             static_cast<std::size_t>(it->length()));
+    for (auto it = matches.rbegin(); it != matches.rend(); ++it)
+        text.erase(it->first, it->second);
+    return text;
 }
 std::string Hash(std::string text) {
     ReplaceAll(text, "\r\n", "\n");
@@ -188,7 +224,9 @@ std::string Control(const std::string &name) {
     return Controls::Names()[static_cast<std::size_t>(id)];
 }
 std::string Name(const std::string &name) {
-    auto letter = [](const char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'; };
+    auto letter = [](const char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+    };
     if (name.empty() || name.size() > 80 || !letter(name[0]) || Starts(name, "__igc_"))
         Fail("Use a valid name (letters, digits and underscores; no __igc_ prefix).");
     for (const char c : name)
@@ -262,7 +300,8 @@ Json ParseJson(const std::string &text) {
             Fail("Visual metadata exceeds its nesting limit.");
         if (event == Json::parse_event_t::object_start)
             keys.emplace_back();
-        else if (event == Json::parse_event_t::key && !keys.back().insert(parsed.get<std::string>()).second)
+        else if (event == Json::parse_event_t::key &&
+                 !keys.back().insert(parsed.get<std::string>()).second)
             Fail("Duplicate visual metadata field.");
         else if (event == Json::parse_event_t::object_end)
             keys.pop_back();
@@ -277,8 +316,8 @@ Json ParseJson(const std::string &text) {
 void ValidateExpression(const std::string &expression) {
     if (Trim(expression).empty() || expression.size() > 4096)
         Fail("A custom condition needs an expression of at most 4,096 characters.");
-    if (expression.find_first_of(";{}") != std::string::npos || expression.find("//") != std::string::npos ||
-        expression.find("/*") != std::string::npos)
+    if (expression.find_first_of(";{}") != std::string::npos ||
+        expression.find("//") != std::string::npos || expression.find("/*") != std::string::npos)
         Fail("A custom condition must be one expression, without statements or comments.");
     int parentheses = 0, brackets = 0;
     for (const char c : expression) {
@@ -389,7 +428,8 @@ void ValidateRows(const VisualDocument &document) {
 VisualCondition ReadCondition(const Json &value, const int depth, int &nodes) {
     if (depth > 12 || ++nodes > 128)
         Fail("Conditions exceed 12 nested levels or 128 nodes.");
-    CheckFields(value, {"Kind", "Control", "Operator", "Value", "Milliseconds", "Expression", "Children"});
+    CheckFields(value,
+                {"Kind", "Control", "Operator", "Value", "Milliseconds", "Expression", "Children"});
     VisualCondition result;
     result.Kind = ReadEnum(value, "Kind", result.Kind, VisualConditionKind::Expression);
     result.Control = ReadString(value, "Control", result.Control);
@@ -434,9 +474,9 @@ void ReadPayload(const std::string &encoded, VisualDocument &document) {
         VisualRule rule;
         rule.Kind = ReadEnum(item, "Kind", rule.Kind, VisualRuleKind::Block);
         rule.Source = ReadString(item, "Source", rule.Source);
-        rule.Target =
-            ReadString(item, "Target",
-                       item.contains("Target") && item["Target"].is_null() ? "SOUTH" : rule.Target, true);
+        rule.Target = ReadString(
+            item, "Target", item.contains("Target") && item["Target"].is_null() ? "SOUTH" : rule.Target,
+            true);
         rule.Value = ReadInt(item, "Value", rule.Value);
         rule.Enabled = ReadBool(item, "Enabled", rule.Enabled);
         document.Rules.push_back(std::move(rule));
@@ -449,8 +489,8 @@ void ReadPayload(const std::string &encoded, VisualDocument &document) {
         document.Constants.push_back(std::move(constant));
     }
     for (const auto &item : value["Macros"]) {
-        CheckFields(item,
-                    {"Name", "Trigger", "Enabled", "Condition", "Activation", "Kind", "Pattern", "Steps"});
+        CheckFields(
+            item, {"Name", "Trigger", "Enabled", "Condition", "Activation", "Kind", "Pattern", "Steps"});
         VisualMacro macro;
         macro.Name = ReadString(item, "Name", macro.Name);
         macro.Trigger = ReadString(item, "Trigger", macro.Trigger);
@@ -475,7 +515,8 @@ void ReadPayload(const std::string &encoded, VisualDocument &document) {
                 VisualMacroStep step;
                 step.Control = ReadString(raw, "Control", step.Control);
                 step.Value = ReadInt(raw, "Value", step.Value);
-                step.DurationMilliseconds = ReadInt(raw, "DurationMilliseconds", step.DurationMilliseconds);
+                step.DurationMilliseconds =
+                    ReadInt(raw, "DurationMilliseconds", step.DurationMilliseconds);
                 step.Blend = ReadEnum(raw, "Blend", step.Blend, VisualBlend::Replace);
                 macro.Steps.push_back(std::move(step));
             }
@@ -556,15 +597,16 @@ std::string MetadataJson(const VisualDocument &document) {
     }
 }
 std::string RemoveManagedSection(std::string source) {
-    const std::size_t start = source.find(Begin), finish = source.find(End);
+    const auto masked = MaskCode(source, false);
+    const std::size_t start = masked.find(Begin), finish = masked.find(End);
     if ((start == std::string::npos) != (finish == std::string::npos) ||
         (start != std::string::npos && finish < start))
         Fail("Visual section markers are incomplete.");
     if (start != std::string::npos)
         source.erase(start, finish + End.size() - start);
     const std::string call = R"rx(/\* @igc-visual-call \*/ __igc_visual_apply(?:_[0-9]+)?\(\);)rx";
-    source = std::regex_replace(source, std::regex("\\r?\\n    " + call + "\\r?\\n"), "");
-    return std::regex_replace(source, std::regex(call), "");
+    source = RemoveOutsideStrings(std::move(source), std::regex("\\r?\\n    " + call + "\\r?\\n"));
+    return RemoveOutsideStrings(std::move(source), std::regex(call));
 }
 const std::array<const char *, 5> RuleNames{"Remap", "Invert", "Deadzone", "Sensitivity", "Block"};
 VisualRuleKind LegacyRuleKind(const std::string &value) {
@@ -613,7 +655,8 @@ std::string ConditionSource(const VisualCondition &condition) {
         return available + " && " + physical + (IsHat(control) ? " >= 0" : " != 0") + " && get_ptime(" +
                control + ") >= " + std::to_string(condition.Milliseconds);
     case VisualConditionKind::DoubleTap:
-        return available + " && double_tap(" + control + ", " + std::to_string(condition.Milliseconds) + ")";
+        return available + " && double_tap(" + control + ", " + std::to_string(condition.Milliseconds) +
+               ")";
     default:
         Fail("Unsupported visual condition.");
     }
@@ -649,9 +692,10 @@ void EmitPattern(const VisualMacro &macro, const std::string &state, const std::
     const bool once = macro.Activation == VisualMacroActivation::OnEnter ||
                       macro.Activation == VisualMacroActivation::OnExit;
     if (once)
-        combos << "combo " << lifetime << " { wait(" << period << "); " << state << "_active = 0; }" << NL;
-    body << "    if (!is_available(" << x << ") || !is_available(" << y << ")) " << state << "_active = 0;"
-         << NL;
+        combos << "combo " << lifetime << " { wait(" << period << "); " << state << "_active = 0; }"
+               << NL;
+    body << "    if (!is_available(" << x << ") || !is_available(" << y << ")) " << state
+         << "_active = 0;" << NL;
     if (once)
         body << "    if (!" << state << "_active) combo_stop(" << lifetime << ");" << NL;
     body << "    if (" << state << "_active && !" << state << "_was) {" << NL << "        " << state
@@ -672,17 +716,19 @@ void EmitPattern(const VisualMacro &macro, const std::string &state, const std::
                                                            : "sin(" + state + "_angle * 2, ") +
                   std::to_string(pattern.AmplitudeY) + ")";
     if (pattern.Blend == VisualBlend::Add)
-        body << "        add_val(" << x << ", " << dx << ");" << NL << "        add_val(" << y << ", " << dy
-             << ");" << NL;
+        body << "        add_val(" << x << ", " << dx << ");" << NL << "        add_val(" << y << ", "
+             << dy << ");" << NL;
     else {
-        const std::string cx = pattern.Center == VisualPatternCenter::DynamicPhysical ? "get_ival(" + x + ")"
-                               : pattern.Center == VisualPatternCenter::Activation    ? state + "_x"
-                                                                                      : "0";
-        const std::string cy = pattern.Center == VisualPatternCenter::DynamicPhysical ? "get_ival(" + y + ")"
-                               : pattern.Center == VisualPatternCenter::Activation    ? state + "_y"
-                                                                                      : "0";
-        body << "        set_val(" << x << ", " << cx << " + " << dx << ");" << NL << "        set_val(" << y
-             << ", " << cy << " + " << dy << ");" << NL;
+        const std::string cx = pattern.Center == VisualPatternCenter::DynamicPhysical
+                                   ? "get_ival(" + x + ")"
+                               : pattern.Center == VisualPatternCenter::Activation ? state + "_x"
+                                                                                   : "0";
+        const std::string cy = pattern.Center == VisualPatternCenter::DynamicPhysical
+                                   ? "get_ival(" + y + ")"
+                               : pattern.Center == VisualPatternCenter::Activation ? state + "_y"
+                                                                                   : "0";
+        body << "        set_val(" << x << ", " << cx << " + " << dx << ");" << NL << "        set_val("
+             << y << ", " << cy << " + " << dy << ");" << NL;
     }
     body << "    }" << NL << "    " << state << "_last = " << state << "_condition;" << NL;
 }
@@ -690,12 +736,14 @@ void EmitPattern(const VisualMacro &macro, const std::string &state, const std::
 
 VisualDocument VisualDocument::Parse(const std::string &source) {
     CheckUtf8(source);
-    const std::size_t begin = source.find(Begin), end = source.find(End);
+    const auto markerSource = MaskCode(source, false);
+    const std::size_t begin = markerSource.find(Begin), end = markerSource.find(End);
     if ((begin == std::string::npos) != (end == std::string::npos) ||
         (begin != std::string::npos && end < begin))
         Fail("Visual section markers are incomplete.");
-    if (begin != std::string::npos && (source.find(Begin, begin + Begin.size()) != std::string::npos ||
-                                       source.find(End, end + End.size()) != std::string::npos))
+    if (begin != std::string::npos &&
+        (markerSource.find(Begin, begin + Begin.size()) != std::string::npos ||
+         markerSource.find(End, end + End.size()) != std::string::npos))
         Fail("Invalid or duplicate visual section markers.");
     bool modified = false;
     if (begin != std::string::npos) {
@@ -713,9 +761,9 @@ VisualDocument VisualDocument::Parse(const std::string &source) {
     }
     std::string preserved = source;
     if (modified) {
-        ReplaceAll(preserved, Begin, "// Advanced code (edited visual section)");
-        ReplaceAll(preserved, End, "// End advanced code");
-        ReplaceAll(preserved, CallPrefix, "/* Custom visual call */ ");
+        ReplaceOutsideStrings(preserved, Begin, "// Advanced code (edited visual section)");
+        ReplaceOutsideStrings(preserved, End, "// End advanced code");
+        ReplaceOutsideStrings(preserved, CallPrefix, "/* Custom visual call */ ");
     } else
         preserved = RemoveManagedSection(std::move(preserved));
     VisualDocument document(std::move(preserved));
@@ -833,8 +881,9 @@ VisualMacro VisualDocument::CreateFigureEightPreset() {
 std::vector<std::string> VisualDocument::GetWarnings() const {
     std::vector<std::string> result;
     if (ManagedSectionModified)
-        result.push_back("Hand-edited generated code is preserved as advanced code; its old visual controls "
-                         "are no longer applied.");
+        result.push_back(
+            "Hand-edited generated code is preserved as advanced code; its old visual controls "
+            "are no longer applied.");
     for (const auto &macro : Macros)
         if (macro.Enabled && macro.Kind == VisualMacroKind::AxisPattern) {
             if (macro.Pattern.Blend == VisualBlend::Add)
@@ -911,10 +960,12 @@ std::string VisualDocument::BuildSource() const {
             continue;
         if (macro.Kind == VisualMacroKind::Sequence && macro.Steps.empty())
             Fail("Macro '" + macro.Name + "' needs at least one timed step.");
-        const std::string combo = macroPrefix + std::to_string(m), state = statePrefix + std::to_string(m);
+        const std::string combo = macroPrefix + std::to_string(m),
+                          state = statePrefix + std::to_string(m);
         std::string condition = macro.Condition ? ConditionSource(*macro.Condition)
                                                 : "event_press(" + Control(macro.Trigger) + ")";
-        definitions << "int " << state << "_last, " << state << "_condition, " << state << "_active;" << NL;
+        definitions << "int " << state << "_last, " << state << "_condition, " << state << "_active;"
+                    << NL;
         if (macro.Kind == VisualMacroKind::AxisPattern) {
             condition = "is_available(" + Control(macro.Pattern.TargetX) + ") && is_available(" +
                         Control(macro.Pattern.TargetY) + ") && (" + condition + ")";
@@ -934,7 +985,8 @@ std::string VisualDocument::BuildSource() const {
                 body << "    " << state << "_active = " << state << "_condition;" << NL;
                 break;
             case VisualMacroActivation::Toggle:
-                body << "    if (" << enter << ") " << state << "_active = !" << state << "_active;" << NL;
+                body << "    if (" << enter << ") " << state << "_active = !" << state << "_active;"
+                     << NL;
                 break;
             }
             const bool repeat = macro.Activation == VisualMacroActivation::WhileTrue ||
@@ -978,10 +1030,11 @@ std::string VisualDocument::BuildSource() const {
         advanced.insert(finish, std::string(NL) + "    " + call + NL);
     }
     const std::string content = "// @document " + Base64(MetadataJson(*this)) + NL + definitions.str() +
-                                "function " + helper + "() {" + NL + body.str() + "}" + NL + combos.str();
+                                "function " + helper + "() {" + NL + body.str() + "}" + NL +
+                                combos.str();
     TrimEnd(advanced);
-    std::string result = advanced + NL + NL + std::string(Begin) + NL + "// @hash " + Hash(content) + NL +
-                         content + std::string(End) + NL;
+    std::string result = advanced + NL + NL + std::string(Begin) + NL + "// @hash " + Hash(content) +
+                         NL + content + std::string(End) + NL;
     CheckUtf8(result);
     static_cast<void>(ScriptCompiler::Compile(result));
     return result;

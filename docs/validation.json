@@ -1,206 +1,79 @@
 ﻿{
-    "Version":  "2.1.0",
+    "Version":  "2.2.0",
     "Passed":  true,
-    "CreatedUtc":  "2026-10-19T21:44:05.2425735Z",
+    "CreatedUtc":  "2026-10-20T14:51:24.9911432Z",
     "Language":  "C++17",
     "Architecture":  "AMD64",
     "ApplicationCLR":  false,
+    "HostDriverOpened":  false,
+    "PhysicalControllersTested":  false,
+    "DriverKernelVersion":  "1.0.2.0",
+    "SdkVersion":  "1.0.4.0",
     "ContentFolders":  [
                            "App",
                            "Scripts",
                            "docs",
                            "Interceptor"
                        ],
-    "Palette":  {
-                    "Blue":  "#2563EB",
-                    "Black":  "#111111",
-                    "White":  "#FFFFFF",
-                    "Gray":  "#9CA3AF"
-                },
-    "NativePureChecks":  197833,
-    "ServiceBoundaryChecks":  24,
-    "Core":  {
-                 "passed":  true,
-                 "tests":  25,
-                 "checks":  79278,
-                 "stress_frames":  202000,
-                 "vm_allocations":  0,
-                 "reference_cases":  107,
-                 "average_us":  0.787846,
-                 "scope":  "native VM software cost, not hardware latency"
-             },
-    "Visual":  {
-                   "passed":  true,
-                   "checks":  3667
-               },
-    "Widgets":  {
-                    "passed":  true,
-                    "driver_access":  false,
-                    "capture_started":  false,
-                    "checks":  6046,
-                    "lifetime_cycles":  100,
-                    "dpi_cases":  [
-                                      96,
-                                      144,
-                                      192
-                                  ],
-                    "gdi_before":  27,
-                    "gdi_after":  27,
-                    "user_before":  20,
-                    "user_after":  19,
-                    "elapsed_ms":  1623.0696,
-                    "scope":  "Hidden native controls, local control messages and offscreen painting only; no host input, capture service, driver, clipboard or file dialogs."
-                },
-    "Ui":  {
-               "Passed":  true,
-               "DriverAccess":  false,
-               "CaptureStarted":  false,
-               "Checks":  [
-                              "Offline UI never constructs a capture service or accesses the driver",
-                              "Native Windows code editor and library controls exist",
-                              "Switching code and visual modes preserves exact source without editing",
-                              "Adding an input rule updates the source-backed visual document",
-                              "Visual rule selectors compile valid changes",
-                              "Invalid visual values keep the last valid source unchanged",
-                              "Invalid visual edits remain visible when switching modes",
-                              "Cancelling discard keeps the invalid edit available",
-                              "Invalid visual edits can be discarded without trapping the app",
-                              "One-click infinity combines A, B, camera threshold and additive axis motion",
-                              "Complex visual motion survives source roundtrip",
-                              "Negating a compound trigger retains all buttons and axis thresholds",
-                              "Repeated negation toggles restore the exact trigger without growing its depth",
-                              "Negating a configured leaf retains its original controller button",
-                              "Removing a leaf negation restores its exact prior condition",
-                              "Switching a motion to a sequence provides a valid editable step",
-                              "Switching to an expression supplies a valid editable default",
-                              "The sequence editor adds multiple timed steps",
-                              "Timed step values and durations are editable",
-                              "Timed steps can be reordered without losing their values",
-                              "Window layout preserves pending visual field edits",
-                              "Invalid step edits keep the selection and fields on the same step",
-                              "Correcting a step error restores a valid sequence",
-                              "Timed steps can be removed while retaining a valid sequence",
-                              "Constants are edited directly into the shared IGC source",
-                              "Native code search selects the matching control name",
-                              "New constants automatically avoid existing setting-name collisions",
-                              "Rejected condition-tree edits roll back both source and visual state",
-                              "Debounced background validation accepts only the newest source",
-                              "Live apply is harmless without an explicitly started capture",
-                              "Demo mode rejects capture injection",
-                              "Compiler diagnostics return to the native interface",
-                              "Draft recovery also retains unfinished invalid code",
-                              "Saving or discarding cancels pending drafts without resurrecting retired files",
-                              "Atomic saves retain the exact previous version in a backup",
-                              "UTF-8 storage preserves accented text and supplementary characters",
-                              "The script library accepts uppercase Windows file extensions",
-                              "Malformed UTF-8 is rejected instead of silently replacing text",
-                              "Embedded zero characters cannot silently truncate scripts",
-                              "Unsaved draft recovery finds a recoverable script",
-                              "Saving a recovered script retires its consumed draft",
-                              "The live monitor prioritizes changed dynamic HID controls",
-                              "Browsing an open dropdown keeps the current script and controls unchanged",
-                              "Cancelling a dropdown preserves the exact current configuration",
-                              "Keyboard focus reveals offscreen properties in the scrolling visual editor",
-                              "Owner-drawn script rows retain real strings for accessibility and keyboard search",
-                              "Live detail updates preserve the reader\u0027s text selection",
-                              "Workspace controls remain within normal, compact, minimum and short desktop bounds",
-                              "Adaptive toolbars and session controls do not overlap on narrow or short desktops",
-                              "Every visual property remains horizontally reachable in narrow and high-DPI workspaces",
-                              "150 percent DPI keeps a large reachable primary action and scaled readable controls",
-                              "Resizing and DPI changes preserve exact script text without marking it edited",
-                              "Rendered native code, visual, macro, motion, popup, compact, minimum and 150 percent DPI interfaces"
-                          ],
-               "Screenshots":  9
-           },
-    "AddressSanitizer":  {
-                             "Passed":  true,
-                             "Compiler":  "MSVC 19.44 / toolset 14.44.35207",
-                             "CTestTargets":  5,
-                             "WidgetChecks":  6046,
-                             "UiChecks":  52,
-                             "Scope":  "Full instrumented application, five offline CTest targets and native UI/storage test; no driver or hardware tests under ASan."
-                         },
-    "Windows11Offline":  {
-                             "Passed":  true,
-                             "UiChecks":  52,
-                             "WidgetChecks":  6046,
-                             "ExactReleaseBinaries":  true,
-                             "DriverInstalled":  false,
-                             "CaptureStarted":  false
-                         },
-    "VmRestored":  true,
-    "GamePadRemapperSHA256":  "7d87cd02490f32d457cf7c20711cbfe955f21612206fb97ec39229a7f6b9bbb5",
-    "SignedIntegrationBaseline":  {
-                                      "Version":  "2.0.0",
-                                      "Commit":  "9cbc97f4d22ecf306dafe5cd2537f4a4ff5e00fe",
-                                      "CaptureEngineAndSdkUnchanged":  true,
-                                      "Live":  {
-                                                   "Passed":  true,
-                                                   "InitialCaptureActive":  true,
-                                                   "InvalidSourcePreservedCapture":  true,
-                                                   "ReinjectAfterFault":  true,
-                                                   "LiveUpdateCannotRestartCapture":  true,
-                                                   "GipAdditiveFigureEight":  true,
-                                                   "HidAdditiveFigureEight":  true,
-                                                   "GipDistinctPatternPoints":  19,
-                                                   "HidDistinctPatternPoints":  22,
-                                                   "ScheduledDuringQuietInput":  true,
-                                                   "RestoredAndIdleWhenConditionCeases":  true,
-                                                   "ElapsedSeconds":  31.0242913,
-                                                   "ProcessCpuSeconds":  0.4375,
-                                                   "PrivateBytes":  2797568,
-                                                   "Active":  {
-                                                                  "Running":  true,
-                                                                  "Received":  26,
-                                                                  "Forwarded":  30,
-                                                                  "Changed":  30,
-                                                                  "TimerOutputs":  4,
-                                                                  "Faults":  0,
-                                                                  "ProcessingMicroseconds":  184.85000000000002
-                                                              },
-                                                   "Swapped":  {
-                                                                   "Running":  true,
-                                                                   "Received":  236,
-                                                                   "Forwarded":  3324,
-                                                                   "Changed":  3172,
-                                                                   "TimerOutputs":  3086,
-                                                                   "Faults":  0,
-                                                                   "ProcessingMicroseconds":  179.56822033898314
-                                                               },
-                                                   "Faulted":  {
-                                                                   "Running":  false,
-                                                                   "Received":  236,
-                                                                   "Forwarded":  3361,
-                                                                   "Changed":  3207,
-                                                                   "TimerOutputs":  3121,
-                                                                   "Faults":  1,
-                                                                   "ProcessingMicroseconds":  179.56822033898314
-                                                               },
-                                                   "Stopped":  {
-                                                                   "Running":  false,
-                                                                   "Received":  0,
-                                                                   "Forwarded":  0,
-                                                                   "Changed":  0,
-                                                                   "TimerOutputs":  0,
-                                                                   "Faults":  0,
-                                                                   "ProcessingMicroseconds":  0.0
-                                                               }
-                                               },
-                                      "Scope":  "Historical 2.0.0 signed-driver virtual HID/GIP integration; not a new live capture test of the 2.1.0 UI executable."
-                                  },
-    "SignedDriver":  {
-                         "Version":  "1.0.0.0",
-                         "SHA256":  "FDFE3A81FA29277A82A7213EAC2B1E101B59A3D3C9618CFC5ADB735C6A05A371",
-                         "Signature":  "Valid",
-                         "Signer":  "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
-                         "Changed":  false
-                     },
-    "Limits":  [
-                   "UI palette excludes operating-system dialogs, title bars and font antialiasing shades.",
-                   "Windows 11 tests in this release are offline and do not install or capture a driver.",
-                   "Physical controller models/transports were not individually retested for this interface-only release.",
-                   "Software throughput is not USB, game or display latency.",
-                   "Bounded stress and AddressSanitizer do not prove absence of every defect.",
-                   "Two-hour expiry and Secure Boot/HVCI certification were not repeated."
-               ]
+    "Configurations":  [
+                           {
+                               "Configuration":  "Release220",
+                               "CTestSuites":  7,
+                               "Passed":  true,
+                               "ParameterChecks":  10036,
+                               "ParameterHotUpdates":  10000,
+                               "ServiceBoundaryChecks":  10032,
+                               "ConcurrentParameterUpdates":  10000,
+                               "Core":  {
+                                            "passed":  true,
+                                            "tests":  25,
+                                            "checks":  79279,
+                                            "stress_frames":  202000,
+                                            "vm_allocations":  0,
+                                            "reference_cases":  107,
+                                            "average_us":  0.861171,
+                                            "scope":  "native VM software cost, not hardware latency"
+                                        },
+                               "Visual":  {
+                                              "passed":  true,
+                                              "checks":  3667
+                                          },
+                               "WidgetChecks":  6046,
+                               "WidgetLifetimeCycles":  100,
+                               "UiChecks":  73,
+                               "ParameterPanelDpiRebuildCycles":  100,
+                               "DriverAccess":  false,
+                               "CaptureStarted":  false
+                           },
+                           {
+                               "Configuration":  "Asan220",
+                               "CTestSuites":  7,
+                               "Passed":  true,
+                               "ParameterChecks":  10036,
+                               "ParameterHotUpdates":  10000,
+                               "ServiceBoundaryChecks":  10032,
+                               "ConcurrentParameterUpdates":  10000,
+                               "Core":  {
+                                            "passed":  true,
+                                            "tests":  25,
+                                            "checks":  79279,
+                                            "stress_frames":  202000,
+                                            "vm_allocations":  0,
+                                            "reference_cases":  107,
+                                            "average_us":  8.24185,
+                                            "scope":  "native VM software cost, not hardware latency"
+                                        },
+                               "Visual":  {
+                                              "passed":  true,
+                                              "checks":  3667
+                                          },
+                               "WidgetChecks":  6046,
+                               "WidgetLifetimeCycles":  100,
+                               "UiChecks":  73,
+                               "ParameterPanelDpiRebuildCycles":  100,
+                               "DriverAccess":  false,
+                               "CaptureStarted":  false
+                           }
+                       ],
+    "Scope":  "Offline compiler/runtime, conversion, publication and native interface/storage/resource tests. No driver installation or capture; no physical end-to-end latency measurement."
 }

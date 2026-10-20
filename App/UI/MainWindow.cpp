@@ -2,6 +2,7 @@
 #include "ScriptStorage.h"
 #include "Theme.h"
 #include "NativeWidgets.h"
+#include "ScriptPanel.h"
 #include "../Core/VisualDocument.h"
 #include "../Capture/Service.h"
 #include "../Capture/Bridge.h"
@@ -30,7 +31,8 @@
 namespace gpr {
 namespace {
 constexpr COLORREF Background = ui::Black, Panel = ui::Black, Raised = ui::Black, Edge = ui::Gray,
-                   Ink = ui::White, Muted = ui::Gray, Accent = ui::Blue, Mint = ui::White, Danger = ui::White;
+                   Ink = ui::White, Muted = ui::Gray, Accent = ui::Blue, Mint = ui::White,
+                   Danger = ui::White;
 constexpr UINT CompiledMessage = WM_APP + 20, OperationMessage = WM_APP + 21;
 constexpr UINT SnapshotMessage = WM_APP + 27;
 enum Id {
@@ -43,6 +45,9 @@ enum Id {
     SaveAs,
     CodeTab,
     VisualTab,
+    UseTab,
+    EditTab,
+    ResetParameters,
     FindText,
     FindNext,
     Check,
@@ -127,8 +132,8 @@ bool Administrator() {
     SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
     PSID group = nullptr;
     BOOL member = FALSE;
-    if (AllocateAndInitializeSid(&authority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0,
-                                 0, 0, 0, &group)) {
+    if (AllocateAndInitializeSid(&authority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0,
+                                 0, 0, 0, 0, 0, &group)) {
         CheckTokenMembership(nullptr, group, &member);
         FreeSid(group);
     }
@@ -232,6 +237,7 @@ class CompilerWorker final {
 struct OperationResult {
     bool Injected = false;
     std::string Source, Error;
+    std::shared_ptr<const ScriptProgram> Program;
 };
 class DraftWriter final {
     std::filesystem::path path_;
@@ -265,7 +271,8 @@ class DraftWriter final {
     }
 
   public:
-    explicit DraftWriter(std::filesystem::path path) : path_(std::move(path)), thread_([this] { Run(); }) {}
+    explicit DraftWriter(std::filesystem::path path)
+        : path_(std::move(path)), thread_([this] { Run(); }) {}
     ~DraftWriter() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -317,6 +324,12 @@ class MainWindow final {
     std::vector<std::size_t> condition_;
     std::vector<std::vector<std::size_t>> treePaths_;
     std::optional<VisualDocument> document_;
+    bool usage_ = true, settingsDirty_ = false;
+    std::unique_ptr<ScriptPanel> parameterPanel_;
+    std::shared_ptr<const ScriptProgram> settingsProgram_, activeProgram_;
+    ParameterValues parameterValues_{};
+    std::map<std::string, int> settings_;
+    std::string settingsWarning_;
     std::unique_ptr<RemapperService> service_;
     std::unique_ptr<CompilerWorker> compiler_;
     std::unique_ptr<DraftWriter> drafts_;
@@ -366,8 +379,9 @@ class MainWindow final {
                     return 0;
                 }
                 if (message == WM_COMMAND || message == WM_NOTIFY || message == WM_DRAWITEM ||
-                    message == WM_MEASUREITEM || message == WM_CTLCOLORSTATIC || message == WM_CTLCOLOREDIT ||
-                    message == WM_CTLCOLORLISTBOX || message == WM_CTLCOLORBTN)
+                    message == WM_MEASUREITEM || message == WM_CTLCOLORSTATIC ||
+                    message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX ||
+                    message == WM_CTLCOLORBTN)
                     return SendMessageW(self->window_, message, w, l);
                 if (message == WM_VSCROLL) {
                     self->Scroll(LOWORD(w), HIWORD(w));
@@ -403,10 +417,11 @@ class MainWindow final {
         return DefSubclassProc(window, message, w, l);
     }
     int S(int value) const { return MulDiv(value, static_cast<int>(dpi_), 96); }
-    HWND Control(int id, const wchar_t *type, const std::wstring &text, DWORD style, HWND parent = nullptr) {
-        HWND value = CreateWindowExW(0, type, text.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1,
-                                     parent ? parent : window_,
-                                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance_, nullptr);
+    HWND Control(int id, const wchar_t *type, const std::wstring &text, DWORD style,
+                 HWND parent = nullptr) {
+        HWND value = CreateWindowExW(
+            0, type, text.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, parent ? parent : window_,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance_, nullptr);
         if (!value)
             throw std::runtime_error("A Windows interface control could not be created.");
         SendMessageW(value, WM_SETFONT, reinterpret_cast<WPARAM>(font_), FALSE);
@@ -425,9 +440,10 @@ class MainWindow final {
     }
     HWND Button(int id, const std::wstring &text, HWND parent = nullptr) {
         const auto button = Control(id, L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, parent);
-        ui::StyleButton(button, id == Inject                       ? ui::ButtonKind::Primary
-                                : id == CodeTab || id == VisualTab ? ui::ButtonKind::Tab
-                                                                   : ui::ButtonKind::Secondary);
+        ui::StyleButton(button, id == Inject ? ui::ButtonKind::Primary
+                                : id == CodeTab || id == VisualTab || id == UseTab || id == EditTab
+                                    ? ui::ButtonKind::Tab
+                                    : ui::ButtonKind::Secondary);
         ui::SetDpi(button, dpi_);
         return button;
     }
@@ -456,36 +472,40 @@ class MainWindow final {
         format.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE;
         format.crTextColor = Ink;
         const auto actualDpi = GetDpiForWindow(control);
-        format.yHeight =
-            MulDiv(mono ? 210 : 225, static_cast<int>(dpi_), static_cast<int>(actualDpi ? actualDpi : 96));
+        format.yHeight = MulDiv(mono ? 210 : 225, static_cast<int>(dpi_),
+                                static_cast<int>(actualDpi ? actualDpi : 96));
         wcscpy_s(format.szFaceName, mono ? L"Consolas" : L"Segoe UI");
         SendMessageW(control, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
         SendMessageW(control, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&format));
     }
     void CreateControls() {
-        for (const auto &item : std::vector<std::pair<int, std::wstring>>{{NewFile, L"+ New"},
-                                                                          {OpenFile, L"Open…"},
-                                                                          {Folder, L"Open scripts folder"},
-                                                                          {Recover, L"Recover draft"},
-                                                                          {Save, L"Save"},
-                                                                          {SaveAs, L"Save as…"},
-                                                                          {CodeTab, L"Code"},
-                                                                          {VisualTab, L"Visual"},
-                                                                          {FindNext, L"Find"},
-                                                                          {Check, L"Validate"},
-                                                                          {Inject, L"Apply script"},
-                                                                          {Stop, L"Stop"},
-                                                                          {Driver, L"Driver setup"},
-                                                                          {Copy, L"Copy diagnostics"},
-                                                                          {AddRule, L"+ Rule"},
-                                                                          {AddMacro, L"+ Macro"},
-                                                                          {Infinity, L"Infinity recipe"},
-                                                                          {AddConstant, L"+ Constant"},
-                                                                          {RemoveItem, L"Remove"}})
+        for (const auto &item :
+             std::vector<std::pair<int, std::wstring>>{{NewFile, L"+ New"},
+                                                       {OpenFile, L"Open…"},
+                                                       {Folder, L"Open scripts folder"},
+                                                       {Recover, L"Recover draft"},
+                                                       {Save, L"Save"},
+                                                       {SaveAs, L"Save as…"},
+                                                       {CodeTab, L"Code"},
+                                                       {VisualTab, L"Visual"},
+                                                       {UseTab, L"Use script"},
+                                                       {EditTab, L"Edit script"},
+                                                       {ResetParameters, L"Reset settings"},
+                                                       {FindNext, L"Find"},
+                                                       {Check, L"Validate"},
+                                                       {Inject, L"Apply script"},
+                                                       {Stop, L"Stop"},
+                                                       {Driver, L"Driver setup"},
+                                                       {Copy, L"Copy diagnostics"},
+                                                       {AddRule, L"+ Rule"},
+                                                       {AddMacro, L"+ Macro"},
+                                                       {Infinity, L"Infinity recipe"},
+                                                       {AddConstant, L"+ Constant"},
+                                                       {RemoveItem, L"Remove"}})
             controls_[item.first] = Button(item.first, item.second);
         controls_[Library] = Control(Library, L"LISTBOX", L"",
-                                     LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT |
-                                         WS_VSCROLL | WS_TABSTOP);
+                                     LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS |
+                                         LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
         controls_[VisualList] = Control(VisualList, L"LISTBOX", L"",
                                         LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS |
                                             LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
@@ -503,11 +523,21 @@ class MainWindow final {
         controls_[Monitor] =
             Control(Monitor, MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
         Rich(controls_[Monitor], false);
-        form_ = CreateWindowExW(0, L"GprVisualForm", L"", WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0, 1, 1,
-                                window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
+        form_ = CreateWindowExW(0, L"GprVisualForm", L"", WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0,
+                                1, 1, window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
         SetWindowLongPtrW(form_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
         SetWindowLongPtrW(form_, GWL_EXSTYLE, WS_EX_CONTROLPARENT);
         ui::StyleScrollbars(form_);
+        parameterPanel_ = std::make_unique<ScriptPanel>(
+            instance_, window_,
+            [this](std::size_t index, int value) {
+                try {
+                    ParameterChanged(index, value);
+                } catch (const std::exception &error) {
+                    Error(error.what());
+                }
+            },
+            [this](const std::string &error) { Error(error); });
         BOOL animation = TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0);
         reduced_ = animation == FALSE;
@@ -524,9 +554,16 @@ class MainWindow final {
     }
     void Visibility() {
         for (int id : {AddRule, AddMacro, Infinity, AddConstant, RemoveItem, VisualList})
-            ShowWindow(controls_[id], visual_ ? SW_SHOW : SW_HIDE);
-        ShowWindow(form_, visual_ ? SW_SHOW : SW_HIDE);
-        ShowWindow(controls_[Code], visual_ ? SW_HIDE : SW_SHOW);
+            ShowWindow(controls_[id], !usage_ && visual_ ? SW_SHOW : SW_HIDE);
+        for (int id : {CodeTab, VisualTab, Check, FindText, FindNext, Save, SaveAs, Live})
+            ShowWindow(controls_[id], usage_ ? SW_HIDE : SW_SHOW);
+        ShowWindow(form_, !usage_ && visual_ ? SW_SHOW : SW_HIDE);
+        ShowWindow(controls_[Code], !usage_ && !visual_ ? SW_SHOW : SW_HIDE);
+        if (parameterPanel_)
+            ShowWindow(parameterPanel_->Handle(), usage_ ? SW_SHOW : SW_HIDE);
+        ShowWindow(controls_[ResetParameters], usage_ ? SW_SHOW : SW_HIDE);
+        ui::SetButtonSelected(controls_[UseTab], usage_);
+        ui::SetButtonSelected(controls_[EditTab], !usage_);
         ui::SetButtonSelected(controls_[CodeTab], !visual_);
         ui::SetButtonSelected(controls_[VisualTab], visual_);
         InvalidateRect(window_, nullptr, FALSE);
@@ -543,6 +580,10 @@ class MainWindow final {
         editorRect_ = {S(ex), S(96), S(er), S(bottom)};
         Place(controls_[Driver], width - 152, 24, 128, 36);
         Place(controls_[Reduce], width - 304, 26, 140, 32);
+        ShowWindow(controls_[Reduce], width < 1000 ? SW_HIDE : SW_SHOW);
+        const int modeX = std::max(432, width / 2 - 120);
+        Place(controls_[UseTab], modeX, 24, 112, 36);
+        Place(controls_[EditTab], modeX + 120, 24, 112, 36);
         const int half = (libraryWidth_ - 48) / 2;
         Place(controls_[NewFile], 20, 144, half, 36);
         Place(controls_[OpenFile], 28 + half, 144, half, 36);
@@ -558,6 +599,9 @@ class MainWindow final {
         Place(controls_[FindText], er - findWidth - 66, 176, findWidth, 36);
         Place(controls_[FindNext], er - 58, 176, 58, 36);
         Place(controls_[Code], ex, 232, ew, std::max(80, contentBottom - 232));
+        Place(controls_[ResetParameters], er - 140, 176, 140, 36);
+        if (parameterPanel_)
+            Place(parameterPanel_->Handle(), ex, 232, ew, std::max(80, contentBottom - 232));
         RECT codeArea{};
         GetClientRect(controls_[Code], &codeArea);
         InflateRect(&codeArea, -S(8), -S(10));
@@ -585,7 +629,7 @@ class MainWindow final {
         Place(controls_[Monitor], rx, monitorTop, inspectorWidth_ - 48,
               std::max(64, bottom - 64 - monitorTop));
         Place(controls_[Copy], rx, bottom - 60, inspectorWidth_ - 48, 38);
-        if (visual_ && !formDirty_)
+        if (!usage_ && visual_ && !formDirty_)
             BuildForm();
         InvalidateRect(window_, nullptr, FALSE);
     }
@@ -616,7 +660,9 @@ class MainWindow final {
         const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
         const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
         const int rx = width - inspectorWidth_ + 24, bottom = height - 32;
-        auto line = [&](int x1, int y1, int x2, int y2) { Fill(dc, {S(x1), S(y1), S(x2), S(y2)}, Edge); };
+        auto line = [&](int x1, int y1, int x2, int y2) {
+            Fill(dc, {S(x1), S(y1), S(x2), S(y2)}, Edge);
+        };
         line(0, 84, width, 85);
         line(libraryWidth_, 85, libraryWidth_ + 1, height - 28);
         line(width - inspectorWidth_, 85, width - inspectorWidth_ + 1, height - 28);
@@ -630,8 +676,8 @@ class MainWindow final {
         Draw(dc, std::to_wstring(libraryFiles_.size()),
              {S(libraryWidth_ - 44), S(111), S(libraryWidth_ - 20), S(132)}, Muted, smallFont_,
              DT_RIGHT | DT_SINGLELINE);
-        Draw(dc, L"Local .igc files", {S(20), S(bottom - 27), S(libraryWidth_ - 20), S(bottom - 8)}, Muted,
-             smallFont_);
+        Draw(dc, L"Local .igc files", {S(20), S(bottom - 27), S(libraryWidth_ - 20), S(bottom - 8)},
+             Muted, smallFont_);
         std::wstring name = currentPath_.empty() ? L"Untitled script" : currentPath_.stem().wstring();
         if (source_ != saved_ || invalidVisual_)
             name += L"  *";
@@ -644,6 +690,8 @@ class MainWindow final {
         Draw(dc, state, {S(ex), S(140), S(er), S(160)}, Muted, smallFont_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
         line(ex, 220, er, 221);
+        if (usage_)
+            Draw(dc, L"Script parameters", {S(ex), S(180), S(er - 150), S(210)}, Ink, headingFont_);
         const auto message = !error_.empty() ? L"!  " + Utf16(error_) : Utf16(status_);
         Draw(dc, message, {S(ex), S(bottom - 96), S(er), S(bottom - 74)}, Ink, font_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -652,7 +700,8 @@ class MainWindow final {
                              : busy_             ? L"Connecting"
                              : snapshot_.Running ? L"Running"
                                                  : L"Stopped";
-        Fill(dc, {S(rx), S(157), S(rx + 7), S(164)}, demo_ || snapshot_.Running || busy_ ? Accent : Muted, 7);
+        Fill(dc, {S(rx), S(157), S(rx + 7), S(164)},
+             demo_ || snapshot_.Running || busy_ ? Accent : Muted, 7);
         Draw(dc, session, {S(rx + 18), S(147), S(width - 24), S(178)}, Ink, headingFont_);
         Draw(dc,
              demo_               ? L"Simulated controller"
@@ -671,15 +720,17 @@ class MainWindow final {
         Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.Changed),
              {S(rx + halfInspector + 8), S(countTop), S(width - 24), S(countTop + 34)}, Ink, titleFont_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, L"Inputs", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted, smallFont_);
+        Draw(dc, L"Inputs", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted,
+             smallFont_);
         Draw(dc, L"Modified", {S(rx + halfInspector + 8), S(labelTop), S(width - 24), S(labelTop + 20)},
              Muted, smallFont_);
         line(rx, controllerTop - (height < 700 ? 8 : 18), width - 24,
              controllerTop - (height < 700 ? 7 : 17));
-        Draw(dc, L"Controllers", {S(rx), S(controllerTop), S(width - 24), S(controllerTop + 22)}, Ink, font_);
+        Draw(dc, L"Controllers", {S(rx), S(controllerTop), S(width - 24), S(controllerTop + 22)}, Ink,
+             font_);
         Draw(dc, demo_ ? L"1 preview" : std::to_wstring(snapshot_.Devices.size()),
-             {S(rx + 100), S(controllerTop + 1), S(width - 24), S(controllerTop + 23)}, Muted, smallFont_,
-             DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS);
+             {S(rx + 100), S(controllerTop + 1), S(width - 24), S(controllerTop + 23)}, Muted,
+             smallFont_, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS);
         Draw(dc, L"Ctrl+Enter Apply   /   Ctrl+S Save   /   Ctrl+F Find",
              {S(20), S(height - 21), S(width - 256), S(height - 3)}, Muted, smallFont_,
              DT_LEFT | DT_SINGLELINE);
@@ -720,7 +771,8 @@ class MainWindow final {
             if (row.Kind == RowKind::Rule) {
                 const auto &rule = document_->Rules[row.Index];
                 heading = Utf16(rule.Source);
-                static const wchar_t *kinds[] = {L"Remap", L"Invert", L"Deadzone", L"Sensitivity", L"Block"};
+                static const wchar_t *kinds[] = {L"Remap", L"Invert", L"Deadzone", L"Sensitivity",
+                                                 L"Block"};
                 detail = kinds[static_cast<std::size_t>(rule.Kind)];
             } else if (row.Kind == RowKind::Macro) {
                 heading = Utf16(document_->Macros[row.Index].Name);
@@ -730,13 +782,14 @@ class MainWindow final {
                 detail = L"Constant";
             }
         }
-        if (item.CtlID == Steps && document_ && row_ >= 0 && static_cast<std::size_t>(row_) < rows_.size()) {
+        if (item.CtlID == Steps && document_ && row_ >= 0 &&
+            static_cast<std::size_t>(row_) < rows_.size()) {
             const auto &macro = document_->Macros[rows_[static_cast<std::size_t>(row_)].Index];
             if (item.itemID < macro.Steps.size()) {
                 const auto &step = macro.Steps[item.itemID];
                 heading = std::to_wstring(item.itemID + 1) + L". " + Utf16(step.Control);
-                detail = std::to_wstring(step.Value) + L" / " + std::to_wstring(step.DurationMilliseconds) +
-                         L" ms";
+                detail = std::to_wstring(step.Value) + L" / " +
+                         std::to_wstring(step.DurationMilliseconds) + L" ms";
             }
         }
         name.bottom = name.top + S(21);
@@ -767,8 +820,52 @@ class MainWindow final {
     }
     void Queue() {
         ++version_;
+        if (parameterPanel_)
+            EnableWindow(parameterPanel_->Handle(), FALSE);
         if (compiler_)
             compiler_->Submit(version_, source_);
+    }
+    void PersistParameters() {
+        if (!settingsDirty_ || currentPath_.empty() || !settingsProgram_)
+            return;
+        ScriptStorage::WriteSettings(currentPath_, settingsProgram_->Interface(), parameterValues_);
+        settingsDirty_ = false;
+        KillTimer(window_, 3);
+        if (ScriptStorage::SettingsFile(currentPath_) !=
+            std::filesystem::path(currentPath_.wstring() + L".settings.json"))
+            status_ = "Settings saved in your Windows user profile; the script folder is read-only";
+    }
+    void ConfigureParameters(std::shared_ptr<const ScriptProgram> program) {
+        settingsProgram_ = std::move(program);
+        const auto &schema = settingsProgram_->Interface();
+        parameterValues_ = schema.Defaults();
+        for (std::size_t i = 0; i < schema.Parameters.size(); ++i) {
+            const auto found = settings_.find(schema.Parameters[i].Name);
+            if (found != settings_.end() && schema.Parameters[i].Accepts(found->second))
+                parameterValues_[i] = found->second;
+        }
+        parameterPanel_->Set(schema, parameterValues_);
+        EnableWindow(parameterPanel_->Handle(), !busy_);
+        EnableWindow(controls_[ResetParameters], !busy_ && !schema.Parameters.empty());
+    }
+    void ParametersChanged() {
+        settingsDirty_ = true;
+        const bool applied = !busy_ && active_ == source_ && service_ && activeProgram_ &&
+                             service_->SetParameters(activeProgram_, parameterValues_);
+        status_ = applied                ? "Settings updated live - macros keep running"
+                  : currentPath_.empty() ? "Settings ready - save the script to remember them"
+                                         : "Settings ready - apply the script to use them";
+        if (!currentPath_.empty())
+            SetTimer(window_, 3, 300, nullptr);
+        InvalidateRect(window_, &editorRect_, FALSE);
+    }
+    void ParameterChanged(std::size_t index, int value) {
+        if (busy_ || !settingsProgram_ || settingsProgram_->Source() != source_ ||
+            index >= settingsProgram_->Interface().Parameters.size())
+            return;
+        parameterValues_[index] = value;
+        settings_[settingsProgram_->Interface().Parameters[index].Name] = value;
+        ParametersChanged();
     }
     void SourceChanged() {
         if (settingCode_)
@@ -782,6 +879,17 @@ class MainWindow final {
         Queue();
     }
     void SetSource(std::string source, std::filesystem::path path, bool modified) {
+        PersistParameters();
+        settingsProgram_.reset();
+        settings_.clear();
+        settingsWarning_.clear();
+        try {
+            settings_ = ScriptStorage::ReadSettings(path);
+        } catch (const std::exception &error) {
+            settingsWarning_ = std::string("Saved settings not loaded; defaults used: ") + error.what();
+        }
+        if (parameterPanel_)
+            parameterPanel_->Set({}, {});
         building_ = true;
         invalidVisual_ = false;
         document_.reset();
@@ -795,8 +903,11 @@ class MainWindow final {
         SetWindowTextW(controls_[Code], Utf16(source_).c_str());
         settingCode_ = false;
         building_ = false;
+        const bool keepUsage = usage_;
         if (visual_)
             EnterVisual();
+        usage_ = keepUsage;
+        Visibility();
         Dirty();
         Queue();
     }
@@ -883,6 +994,9 @@ class MainWindow final {
             return false;
         ScriptStorage::Write(path, source_);
         currentPath_ = std::move(path);
+        if (settingsProgram_)
+            ScriptStorage::WriteSettings(currentPath_, settingsProgram_->Interface(), parameterValues_);
+        settingsDirty_ = false;
         saved_ = source_;
         RetireDrafts();
         LoadLibrary();
@@ -891,14 +1005,16 @@ class MainWindow final {
         return true;
     }
     bool Confirm() {
+        PersistParameters();
         const bool valid = FlushForm();
-        if (source_ == saved_ && valid)
+        if (source_ == saved_ && valid && !(settingsDirty_ && currentPath_.empty()))
             return true;
         const std::wstring message =
-            valid ? L"Save your changes before continuing?"
-                  : L"Some visual fields are invalid and have not been applied.\n\nSave the last valid "
-                    L"script before continuing?\nYes saves the valid script and discards those fields. No "
-                    L"discards the edits. Cancel returns to the editor.";
+            valid
+                ? L"Save your changes before continuing?"
+                : L"Some visual fields are invalid and have not been applied.\n\nSave the last valid "
+                  L"script before continuing?\nYes saves the valid script and discards those fields. No "
+                  L"discards the edits. Cancel returns to the editor.";
         const int choice = discardPrompt_ ? discardPrompt_(message)
                                           : MessageBoxW(window_, message.c_str(), L"Unsaved script",
                                                         MB_YESNOCANCEL | MB_ICONQUESTION);
@@ -922,6 +1038,7 @@ class MainWindow final {
     void Find() {
         if (!FlushForm())
             return;
+        usage_ = false;
         visual_ = false;
         Visibility();
         const auto needle = Text(controls_[FindText]);
@@ -939,7 +1056,8 @@ class MainWindow final {
             SendMessageW(controls_[Code], EM_FINDTEXTEXW, FR_DOWN, reinterpret_cast<LPARAM>(&find));
         if (result < 0) {
             find.chrg.cpMin = 0;
-            result = SendMessageW(controls_[Code], EM_FINDTEXTEXW, FR_DOWN, reinterpret_cast<LPARAM>(&find));
+            result =
+                SendMessageW(controls_[Code], EM_FINDTEXTEXW, FR_DOWN, reinterpret_cast<LPARAM>(&find));
         }
         if (result >= 0) {
             SendMessageW(controls_[Code], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&find.chrgText));
@@ -990,10 +1108,11 @@ class MainWindow final {
     void Edit(int id, const std::wstring &label, const std::string &value, int x, int y, int width,
               bool multiline = false) {
         Label(label, x, y, width);
-        auto input = Control(id, L"EDIT", Utf16(value),
-                             WS_BORDER | WS_TABSTOP |
-                                 (multiline ? ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL : ES_AUTOHSCROLL),
-                             form_);
+        auto input =
+            Control(id, L"EDIT", Utf16(value),
+                    WS_BORDER | WS_TABSTOP |
+                        (multiline ? ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL : ES_AUTOHSCROLL),
+                    form_);
         Place(input, x, y + 25 - scroll_, width, multiline ? 84 : 36);
         SendMessageW(input, EM_LIMITTEXT, id == Expression ? 4096 : 4096, 0);
         fields_[id] = input;
@@ -1001,19 +1120,20 @@ class MainWindow final {
     void EditNumber(int id, const std::wstring &label, int value, int x, int y, int width) {
         Edit(id, label, std::to_string(value), x, y, width);
     }
-    void Select(int id, const std::wstring &label, const std::vector<std::wstring> &options, int value, int x,
-                int y, int width) {
+    void Select(int id, const std::wstring &label, const std::vector<std::wstring> &options, int value,
+                int x, int y, int width) {
         Label(label, x, y, width);
-        auto input =
-            Control(id, L"COMBOBOX", L"",
-                    CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, form_);
+        auto input = Control(
+            id, L"COMBOBOX", L"",
+            CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, form_);
         for (const auto &option : options)
             SendMessageW(input, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(option.c_str()));
         SendMessageW(input, CB_SETCURSEL, value, 0);
         Place(input, x, y + 25 - scroll_, width, 300);
         fields_[id] = input;
     }
-    void ControlSelect(int id, const std::wstring &label, const std::string &value, int x, int y, int width) {
+    void ControlSelect(int id, const std::wstring &label, const std::string &value, int x, int y,
+                       int width) {
         Label(label, x, y, width);
         auto input = Control(id, L"COMBOBOX", L"",
                              CBS_DROPDOWN | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | CBS_AUTOHSCROLL |
@@ -1076,11 +1196,13 @@ class MainWindow final {
         std::wstring label = kinds[static_cast<std::size_t>(node.Kind)];
         if (node.Kind >= VisualConditionKind::Held && node.Kind != VisualConditionKind::Expression)
             label += L" · " + Utf16(node.Control);
-        if (node.Kind == VisualConditionKind::Compare || node.Kind == VisualConditionKind::AbsoluteCompare)
+        if (node.Kind == VisualConditionKind::Compare ||
+            node.Kind == VisualConditionKind::AbsoluteCompare)
             label += L" " + Utf16(node.Operator) + L" " + std::to_wstring(node.Value);
         return label;
     }
-    void TreeNode(HWND tree, const VisualCondition &node, HTREEITEM parent, std::vector<std::size_t> path) {
+    void TreeNode(HWND tree, const VisualCondition &node, HTREEITEM parent,
+                  std::vector<std::size_t> path) {
         const auto label = ConditionLabel(node);
         treePaths_.push_back(path);
         TVINSERTSTRUCTW insert{};
@@ -1116,7 +1238,8 @@ class MainWindow final {
                                     : row.Kind == RowKind::Macro
                                         ? Utf16(document_->Macros[row.Index].Name)
                                         : Utf16(document_->Constants[row.Index].Name);
-                SendMessageW(controls_[VisualList], LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
+                SendMessageW(controls_[VisualList], LB_ADDSTRING, 0,
+                             reinterpret_cast<LPARAM>(name.c_str()));
             }
             if (rows_.empty())
                 row_ = -1;
@@ -1179,8 +1302,8 @@ class MainWindow final {
             Edit(Name, L"Macro name", macro.Name, 12, y, width - 128);
             EnableField(macro.Enabled, width - 104, y + 24);
             y += 80;
-            Select(Kind, L"Action", {L"Timed sequence", L"Axis motion"}, static_cast<int>(macro.Kind), 12, y,
-                   half);
+            Select(Kind, L"Action", {L"Timed sequence", L"Axis motion"}, static_cast<int>(macro.Kind),
+                   12, y, half);
             Select(Activation, L"Activation",
                    {L"On activation", L"While true", L"On deactivation", L"Toggle"},
                    static_cast<int>(macro.Activation), half + 24, y, half);
@@ -1215,15 +1338,17 @@ class MainWindow final {
             }
             Select(ConditionKind, L"Selected condition",
                    {L"ALL of these", L"ANY of these", L"NOT this", L"Button held", L"Button pressed",
-                    L"Button released", L"Axis / value", L"Absolute value", L"Held for time", L"Double tap",
-                    L"IGC expression"},
+                    L"Button released", L"Axis / value", L"Absolute value", L"Held for time",
+                    L"Double tap", L"IGC expression"},
                    static_cast<int>(node->Kind), 12, y, width);
             y += 80;
-            if (node->Kind >= VisualConditionKind::Held && node->Kind != VisualConditionKind::Expression) {
+            if (node->Kind >= VisualConditionKind::Held &&
+                node->Kind != VisualConditionKind::Expression) {
                 ControlSelect(ConditionControl, L"Control", node->Control, 12, y, half);
                 if (node->Kind == VisualConditionKind::HeldFor ||
                     node->Kind == VisualConditionKind::DoubleTap)
-                    EditNumber(ConditionTime, L"Time window (ms)", node->Milliseconds, half + 24, y, half);
+                    EditNumber(ConditionTime, L"Time window (ms)", node->Milliseconds, half + 24, y,
+                               half);
                 y += 80;
                 if (node->Kind == VisualConditionKind::Compare ||
                     node->Kind == VisualConditionKind::AbsoluteCompare) {
@@ -1240,13 +1365,15 @@ class MainWindow final {
                 y += 125;
             }
             y += 8;
-            Label(macro.Kind == VisualMacroKind::AxisPattern ? L"Motion" : L"Sequence steps", 12, y, width);
+            Label(macro.Kind == VisualMacroKind::AxisPattern ? L"Motion" : L"Sequence steps", 12, y,
+                  width);
             y += 30;
             if (macro.Kind == VisualMacroKind::AxisPattern) {
                 const auto &p = macro.Pattern;
-                Select(Shape, L"Shape", {L"Figure eight", L"Circle", L"Sine"}, static_cast<int>(p.Shape), 12,
-                       y, half);
-                Select(Blend, L"Output", {L"Add", L"Replace"}, static_cast<int>(p.Blend), half + 24, y, half);
+                Select(Shape, L"Shape", {L"Figure eight", L"Circle", L"Sine"}, static_cast<int>(p.Shape),
+                       12, y, half);
+                Select(Blend, L"Output", {L"Add", L"Replace"}, static_cast<int>(p.Blend), half + 24, y,
+                       half);
                 y += 80;
                 ControlSelect(TargetX, L"Horizontal axis", p.TargetX, 12, y, half);
                 ControlSelect(TargetY, L"Vertical axis", p.TargetY, half + 24, y, half);
@@ -1285,19 +1412,22 @@ class MainWindow final {
                 if (!macro.Steps.empty()) {
                     const auto &s = macro.Steps[static_cast<std::size_t>(step_)];
                     ControlSelect(StepControl, L"Control", s.Control, 12, y, half);
-                    Select(StepBlend, L"Output", {L"Add", L"Replace"}, static_cast<int>(s.Blend), half + 24,
-                           y, half);
+                    Select(StepBlend, L"Output", {L"Add", L"Replace"}, static_cast<int>(s.Blend),
+                           half + 24, y, half);
                     y += 80;
                     EditNumber(StepValue, L"Value", s.Value, 12, y, half);
-                    EditNumber(StepDuration, L"Duration (ms)", s.DurationMilliseconds, half + 24, y, half);
+                    EditNumber(StepDuration, L"Duration (ms)", s.DurationMilliseconds, half + 24, y,
+                               half);
                     y += 80;
                 }
                 int x = 12;
-                for (auto item : std::vector<std::pair<int, std::wstring>>{
-                         {AddStep, L"+ Step"}, {RemoveStep, L"Remove"}, {UpStep, L"↑"}, {DownStep, L"↓"}}) {
+                for (auto item : std::vector<std::pair<int, std::wstring>>{{AddStep, L"+ Step"},
+                                                                           {RemoveStep, L"Remove"},
+                                                                           {UpStep, L"↑"},
+                                                                           {DownStep, L"↓"}}) {
                     auto button = Button(item.first, item.second, form_);
-                    Place(button, x, y - scroll_, item.first == AddStep || item.first == RemoveStep ? 88 : 40,
-                          29);
+                    Place(button, x, y - scroll_,
+                          item.first == AddStep || item.first == RemoveStep ? 88 : 40, 29);
                     fields_[item.first] = button;
                     x += item.first == AddStep || item.first == RemoveStep ? 96 : 48;
                 }
@@ -1371,8 +1501,8 @@ class MainWindow final {
             SCROLLINFO info{sizeof(info),
                             static_cast<UINT>(code == SB_THUMBPOSITION ? SIF_POS : SIF_TRACKPOS)};
             GetScrollInfo(form_, SB_VERT, &info);
-            ScrollTo(
-                MulDiv(code == SB_THUMBPOSITION ? info.nPos : info.nTrackPos, 96, static_cast<int>(dpi_)));
+            ScrollTo(MulDiv(code == SB_THUMBPOSITION ? info.nPos : info.nTrackPos, 96,
+                            static_cast<int>(dpi_)));
             (void)thumb;
         }
     }
@@ -1392,7 +1522,8 @@ class MainWindow final {
                     r.Target = Utf8(FieldText(Target));
                 if (fields_.count(Value))
                     r.Value = Number(Value);
-                if (changed == Kind && r.Kind == VisualRuleKind::Deadzone && (r.Value < 0 || r.Value > 99))
+                if (changed == Kind && r.Kind == VisualRuleKind::Deadzone &&
+                    (r.Value < 0 || r.Value > 99))
                     r.Value = 8;
             } else if (row.Kind == RowKind::Constant) {
                 auto &c = candidate.Constants[row.Index];
@@ -1506,6 +1637,7 @@ class MainWindow final {
             return;
         try {
             document_ = VisualDocument::Parse(source_);
+            usage_ = false;
             visual_ = true;
             invalidVisual_ = false;
             BuildVisualList();
@@ -1595,7 +1727,8 @@ class MainWindow final {
             const auto row = rows_[static_cast<std::size_t>(row_)];
             if (id == RemoveItem) {
                 if (row.Kind == RowKind::Rule)
-                    document_->Rules.erase(document_->Rules.begin() + static_cast<std::ptrdiff_t>(row.Index));
+                    document_->Rules.erase(document_->Rules.begin() +
+                                           static_cast<std::ptrdiff_t>(row.Index));
                 else if (row.Kind == RowKind::Constant)
                     document_->Constants.erase(document_->Constants.begin() +
                                                static_cast<std::ptrdiff_t>(row.Index));
@@ -1610,7 +1743,8 @@ class MainWindow final {
                     auto *node = ConditionAt(m, condition_);
                     if (!node)
                         return;
-                    if (node->Kind == VisualConditionKind::All || node->Kind == VisualConditionKind::Any) {
+                    if (node->Kind == VisualConditionKind::All ||
+                        node->Kind == VisualConditionKind::Any) {
                         if (node->Children.size() >= 16)
                             throw std::runtime_error("A condition group supports 16 children.");
                         node->Children.push_back({});
@@ -1675,8 +1809,13 @@ class MainWindow final {
         busy_ = value;
         SendMessageW(controls_[Code], EM_SETREADONLY, value, 0);
         EnableWindow(form_, !value);
-        for (int id : {Library, NewFile, OpenFile, Recover, Save, SaveAs, Inject, Check, AddRule, AddMacro,
-                       Infinity, AddConstant, RemoveItem, Live})
+        if (parameterPanel_)
+            EnableWindow(parameterPanel_->Handle(),
+                         !value && settingsProgram_ && settingsProgram_->Source() == source_);
+        EnableWindow(controls_[ResetParameters],
+                     !value && settingsProgram_ && settingsProgram_->Source() == source_);
+        for (int id : {Library, NewFile, OpenFile, Recover, Save, SaveAs, Inject, Check, AddRule,
+                       AddMacro, Infinity, AddConstant, RemoveItem, Live})
             EnableWindow(controls_[id], !value && !(demo_ && id == Inject));
         EnableWindow(controls_[Stop], snapshot_.Running && !value);
         if (value)
@@ -1699,6 +1838,8 @@ class MainWindow final {
         std::filesystem::create_directories(directory);
         const auto pending = directory / draftPath_.filename();
         ScriptStorage::Write(pending, source_, false);
+        if (settingsProgram_)
+            ScriptStorage::WriteSettings(pending, settingsProgram_->Interface(), parameterValues_);
         if (drafts_)
             drafts_->CancelAndWait();
         ScriptStorage::Write(draftPath_, source_, false);
@@ -1742,13 +1883,15 @@ class MainWindow final {
             operation_.join();
         Busy(true);
         const auto text = source_;
-        operation_ = std::thread([this, inject, program = std::move(program), text] {
+        const auto values = parameterValues_;
+        operation_ = std::thread([this, inject, program = std::move(program), text, values] {
             auto result = std::make_unique<OperationResult>();
             result->Injected = inject;
             result->Source = text;
+            result->Program = program;
             try {
                 if (inject)
-                    service_->Inject(program);
+                    service_->Inject(program, values);
                 else
                     service_->Stop();
             } catch (const std::exception &error) {
@@ -1765,6 +1908,8 @@ class MainWindow final {
         if (source_ != saved_ && drafts_)
             drafts_->Submit(source_);
         if (!result->Error.empty()) {
+            if (parameterPanel_)
+                parameterPanel_->Set({}, {});
             Error(result->Error);
             if (injectVersion_) {
                 injectVersion_ = 0;
@@ -1774,6 +1919,7 @@ class MainWindow final {
                 Close();
             return;
         }
+        ConfigureParameters(result->Program);
         if (injectVersion_ == result->Version) {
             injectVersion_ = 0;
             if (closeRequested_) {
@@ -1797,14 +1943,18 @@ class MainWindow final {
             bool applied = false;
             if (!demo_ && !busy_ && service_ &&
                 SendMessageW(controls_[Live], BM_GETCHECK, 0, 0) == BST_CHECKED && active_ != source_)
-                applied = service_->TryUpdate(result->Program);
-            if (applied)
+                applied = service_->TryUpdate(result->Program, parameterValues_);
+            if (applied) {
                 active_ = source_;
+                activeProgram_ = result->Program;
+            }
             const bool active = service_ && service_->IsRunning() && active_ == source_;
             status_ = demo_     ? "Demo preview - no controller connected"
                       : applied ? "✓ Live changes applied"
                       : active  ? "✓ This version is active"
                                 : "✓ Valid script · ready to inject";
+            if (!settingsWarning_.empty())
+                status_ += " | " + settingsWarning_;
         }
         UpdateMonitor();
         InvalidateRect(window_, &editorRect_, FALSE);
@@ -1859,7 +2009,7 @@ class MainWindow final {
     }
     void UpdateMonitor() {
         std::ostringstream diagnostic;
-        diagnostic << "GamePad Remapper 2.1 - native C++\n"
+        diagnostic << "GamePad Remapper 2.2 - native C++\n"
                    << (demo_ ? "SIMULATED PREVIEW - no driver or controller access" : snapshot_.Status)
                    << "\n\n"
                    << (snapshot_.Running ? "Configuration active" : "Not capturing") << "\n"
@@ -1870,12 +2020,14 @@ class MainWindow final {
                    << " us software processing\n\n";
         std::ostringstream visible;
         if (demo_)
-            visible << "Preview gamepad\nOffline example\n\nLX  0    LY  0\nRX  0    RY  0\n\nLive controls "
-                       "appear here\nafter you apply a script.";
+            visible
+                << "Preview gamepad\nOffline example\n\nLX  0    LY  0\nRX  0    RY  0\n\nLive controls "
+                   "appear here\nafter you apply a script.";
         else if (snapshot_.Devices.empty())
-            visible << (snapshot_.Running
-                            ? "Waiting for a controller...\n\nCompatible controllers appear automatically."
-                            : "No active session\n\nApply your script to connect a controller.");
+            visible
+                << (snapshot_.Running
+                        ? "Waiting for a controller...\n\nCompatible controllers appear automatically."
+                        : "No active session\n\nApply your script to connect a controller.");
         for (const auto &device : snapshot_.Devices) {
             visible << device.Name << "\n" << Values(device) << "\n\n";
             diagnostic << device.Name << "\n"
@@ -1885,19 +2037,20 @@ class MainWindow final {
                        << Values(device) << "\n"
                        << device.Diagnostic << "\n\n";
             if (device.Family == 3)
-                diagnostic << "Generic HID uses reported AXIS / BUTTON / VALUE controls; face aliases are "
-                              "not guessed.\n\n";
+                diagnostic
+                    << "Generic HID uses reported AXIS / BUTTON / VALUE controls; face aliases are "
+                       "not guessed.\n\n";
         }
         if (!error_.empty())
             visible << "\nScript needs attention\n" << error_;
         if (!snapshot_.Error.empty())
             visible << "\nConnection details\n" << snapshot_.Error;
-        diagnostic << "DIAGNOSTICS\n"
-                   << (!error_.empty() ? error_ : status_) << "\n"
-                   << snapshot_.Error
-                   << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\n"
-                   << "Stop or close restores normal input.\nSoftware timing excludes USB/controller/display "
-                      "latency.";
+        diagnostic
+            << "DIAGNOSTICS\n"
+            << (!error_.empty() ? error_ : status_) << "\n"
+            << snapshot_.Error << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\n"
+            << "Stop or close restores normal input.\nSoftware timing excludes USB/controller/display "
+               "latency.";
         diagnostic_ = diagnostic.str();
         const auto text = Utf16(visible.str());
         if (Text(controls_[Monitor]) != text) {
@@ -1969,7 +2122,8 @@ class MainWindow final {
             return;
         }
         if (id == VisualList && event == LBN_SELCHANGE) {
-            const int selected = static_cast<int>(SendMessageW(controls_[VisualList], LB_GETCURSEL, 0, 0));
+            const int selected =
+                static_cast<int>(SendMessageW(controls_[VisualList], LB_GETCURSEL, 0, 0));
             if (FlushForm()) {
                 row_ = selected;
                 condition_.clear();
@@ -1982,7 +2136,8 @@ class MainWindow final {
         }
         if (id == Library && event == LBN_SELCHANGE) {
             const int selected = static_cast<int>(SendMessageW(controls_[Library], LB_GETCURSEL, 0, 0));
-            if (selected >= 0 && static_cast<std::size_t>(selected) < libraryFiles_.size() && Confirm()) {
+            if (selected >= 0 && static_cast<std::size_t>(selected) < libraryFiles_.size() &&
+                Confirm()) {
                 const auto path = libraryFiles_[static_cast<std::size_t>(selected)];
                 try {
                     Open(path);
@@ -2000,6 +2155,8 @@ class MainWindow final {
         case NewFile:
             if (!busy_ && Confirm()) {
                 RetireDrafts();
+                usage_ = false;
+                visual_ = false;
                 SetSource("// GamePad Remapper · IGC\nmain {\n}\n", {}, true);
                 LoadLibrary();
             }
@@ -2019,12 +2176,33 @@ class MainWindow final {
             break;
         case CodeTab:
             if (FlushForm()) {
+                usage_ = false;
                 visual_ = false;
                 Visibility();
             }
             break;
         case VisualTab:
             EnterVisual();
+            break;
+        case UseTab:
+            if (FlushForm()) {
+                usage_ = true;
+                Visibility();
+                Layout();
+            }
+            break;
+        case EditTab:
+            usage_ = false;
+            Visibility();
+            Layout();
+            break;
+        case ResetParameters:
+            if (!busy_ && settingsProgram_ && settingsProgram_->Source() == source_) {
+                settings_.clear();
+                parameterValues_ = settingsProgram_->Interface().Defaults();
+                parameterPanel_->Set(settingsProgram_->Interface(), parameterValues_);
+                ParametersChanged();
+            }
             break;
         case FindNext:
             Find();
@@ -2057,11 +2235,12 @@ class MainWindow final {
             break;
         case Driver: {
             const auto installer = ExecutableDirectory() / L"InterceptorSetup.exe";
-            ShellExecuteW(window_, L"open",
-                          std::filesystem::exists(installer)
-                              ? installer.c_str()
-                              : L"https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/latest",
-                          nullptr, nullptr, SW_SHOWNORMAL);
+            ShellExecuteW(
+                window_, L"open",
+                std::filesystem::exists(installer)
+                    ? installer.c_str()
+                    : L"https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/latest",
+                nullptr, nullptr, SW_SHOWNORMAL);
             break;
         }
         case Recover:
@@ -2116,6 +2295,8 @@ class MainWindow final {
         for (const auto label : labels_)
             SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(smallFont_), TRUE);
         ui::SetDpi(form_, dpi_);
+        if (parameterPanel_)
+            parameterPanel_->SetDpi(dpi_);
         settingCode_ = wasSettingCode;
     }
     LRESULT Message(UINT message, WPARAM w, LPARAM l) {
@@ -2183,6 +2364,10 @@ class MainWindow final {
         case WM_COMMAND:
             Command(LOWORD(w), HIWORD(w));
             return 0;
+        case WM_MOUSEWHEEL:
+            if (usage_ && parameterPanel_)
+                return SendMessageW(parameterPanel_->Handle(), message, w, l);
+            return DefWindowProcW(window_, message, w, l);
         case WM_NOTIFY: {
             auto *header = reinterpret_cast<NMHDR *>(l);
             if (header->idFrom == TriggerTree && header->code == NM_CUSTOMDRAW) {
@@ -2228,6 +2413,10 @@ class MainWindow final {
                 Refresh();
             else if (w == 2)
                 InvalidateRect(window_, &editorRect_, FALSE);
+            else if (w == 3) {
+                KillTimer(window_, 3);
+                PersistParameters();
+            }
             return 0;
         case CompiledMessage:
             Compiled(std::unique_ptr<CompileResult>(reinterpret_cast<CompileResult *>(l)));
@@ -2239,6 +2428,7 @@ class MainWindow final {
             Busy(false);
             if (result->Error.empty()) {
                 active_ = result->Injected ? result->Source : std::string{};
+                activeProgram_ = result->Injected ? result->Program : nullptr;
                 error_.clear();
                 status_ = result->Injected ? "✓ Configuration applied atomically"
                                            : "Session stopped · normal input restored";
@@ -2253,9 +2443,11 @@ class MainWindow final {
             Close();
             return 0;
         case WM_DESTROY:
-            if (!demo_) GR_SetSnapshotWindow(nullptr, 0);
+            if (!demo_)
+                GR_SetSnapshotWindow(nullptr, 0);
             KillTimer(window_, 1);
             KillTimer(window_, 2);
+            KillTimer(window_, 3);
             PostQuitMessage(0);
             return 0;
         default:
@@ -2267,7 +2459,8 @@ class MainWindow final {
     MainWindow(HINSTANCE instance, bool demo, const std::filesystem::path &scripts = {})
         : instance_(instance), demo_(demo),
           libraryDirectory_(scripts.empty() ? ScriptStorage::DefaultDirectory() : scripts) {
-        const auto recovery = demo_ ? libraryDirectory_ / L".recovery" : ScriptStorage::RecoveryDirectory();
+        const auto recovery =
+            demo_ ? libraryDirectory_ / L".recovery" : ScriptStorage::RecoveryDirectory();
         draftPath_ = ScriptStorage::UniquePath(recovery);
         if (!demo_)
             service_ = std::make_unique<RemapperService>();
@@ -2288,13 +2481,15 @@ class MainWindow final {
         GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &monitor);
         const int workWidth = monitor.rcWork.right - monitor.rcWork.left;
         const int workHeight = monitor.rcWork.bottom - monitor.rcWork.top;
-        const int initialWidth = std::min(MulDiv(1440, static_cast<int>(GetDpiForSystem()), 96), workWidth);
-        const int initialHeight = std::min(MulDiv(930, static_cast<int>(GetDpiForSystem()), 96), workHeight);
-        window_ =
-            CreateWindowExW(0, L"GprMainWindow", L"GamePad Remapper", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                            monitor.rcWork.left + (workWidth - initialWidth) / 2,
-                            monitor.rcWork.top + (workHeight - initialHeight) / 2, initialWidth,
-                            initialHeight, nullptr, nullptr, instance_, this);
+        const int initialWidth =
+            std::min(MulDiv(1440, static_cast<int>(GetDpiForSystem()), 96), workWidth);
+        const int initialHeight =
+            std::min(MulDiv(930, static_cast<int>(GetDpiForSystem()), 96), workHeight);
+        window_ = CreateWindowExW(0, L"GprMainWindow", L"GamePad Remapper",
+                                  WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                  monitor.rcWork.left + (workWidth - initialWidth) / 2,
+                                  monitor.rcWork.top + (workHeight - initialHeight) / 2, initialWidth,
+                                  initialHeight, nullptr, nullptr, instance_, this);
         if (!window_)
             throw std::runtime_error("The application window could not be created.");
         BOOL dark = TRUE;
@@ -2306,12 +2501,15 @@ class MainWindow final {
                   false);
         status_ = "Ready · scripts are checked automatically";
         Busy(false);
+        Visibility();
         UpdateMonitor();
         SetTimer(window_, 1, 1000, nullptr);
-        if (!demo_) GR_SetSnapshotWindow(window_, SnapshotMessage);
+        if (!demo_)
+            GR_SetSnapshotWindow(window_, SnapshotMessage);
     }
     ~MainWindow() {
-        if (!demo_) GR_SetSnapshotWindow(nullptr, 0);
+        if (!demo_)
+            GR_SetSnapshotWindow(nullptr, 0);
         compiler_.reset();
         drafts_.reset();
         if (operation_.joinable())
@@ -2358,6 +2556,11 @@ class MainWindow final {
             Command(NewFile, BN_CLICKED);
             return true;
         case 'F':
+            if (!FlushForm())
+                return true;
+            usage_ = false;
+            visual_ = false;
+            Visibility();
             SetFocus(controls_[FindText]);
             SendMessageW(controls_[FindText], EM_SETSEL, 0, -1);
             return true;
@@ -2369,8 +2572,8 @@ class MainWindow final {
         }
     }
     void Arguments(const std::vector<std::wstring> &args) {
-        SendMessageW(controls_[Live], BM_SETCHECK, Has(args, L"--live-apply") ? BST_CHECKED : BST_UNCHECKED,
-                     0);
+        SendMessageW(controls_[Live], BM_SETCHECK,
+                     Has(args, L"--live-apply") ? BST_CHECKED : BST_UNCHECKED, 0);
         const auto session = Argument(args, L"--session"), open = Argument(args, L"--open");
         if (!session.empty()) {
             const auto full = std::filesystem::absolute(session);
@@ -2380,19 +2583,24 @@ class MainWindow final {
             const auto source = ScriptStorage::Read(full);
             const auto origin = Argument(args, L"--origin");
             SetSource(source, origin, true);
+            settings_ = ScriptStorage::ReadSettings(full);
             if (!origin.empty() && std::filesystem::exists(origin))
                 saved_ = ScriptStorage::Read(origin);
             const auto previous = draftPath_.parent_path() / full.filename();
             if (std::filesystem::exists(previous))
                 consumedDraft_ = previous;
             std::filesystem::remove(full);
+            std::error_code settingsError;
+            std::filesystem::remove(std::filesystem::path(full.wstring() + L".settings.json"),
+                                    settingsError);
             LoadLibrary();
         } else if (!open.empty())
             Open(open);
         if (Has(args, L"--inject"))
             RequestInject();
     }
-    void Test(std::function<void(bool, const std::string &)> require, const std::filesystem::path &directory);
+    void Test(std::function<void(bool, const std::string &)> require,
+              const std::filesystem::path &directory);
     void ResizePreview(int width, int height, UINT dpi = 96) {
         layoutTest_ = true;
         ApplyDpi(dpi);
@@ -2413,8 +2621,9 @@ class MainWindow final {
         status_ = "Demo preview - no controller connected";
         SetWindowTextW(controls_[FindText], L"");
         SendMessageW(controls_[Live], BM_SETCHECK, BST_UNCHECKED, 0);
-        auto doc = VisualDocument::Parse("// Everyday controller\ndefine CAMERA_SPEED = 115;\nmain {\n    // "
-                                         "Add advanced logic here.\n}\n");
+        auto doc =
+            VisualDocument::Parse("// Everyday controller\ndefine CAMERA_SPEED = 115;\nmain {\n    // "
+                                  "Add advanced logic here.\n}\n");
         doc.Rules.push_back({VisualRuleKind::Deadzone, "LX", "EAST", 8, true});
         doc.Rules.push_back({VisualRuleKind::Invert, "RY", "EAST", 0, true});
         doc.Macros.push_back(VisualDocument::CreateFigureEightPreset());
@@ -2437,9 +2646,20 @@ class MainWindow final {
         const auto path = libraryDirectory_ / L"07 - Additive Figure Eight.igc";
         if (std::filesystem::exists(path))
             SetSource(ScriptStorage::Read(path), path, false);
+        usage_ = false;
         visual_ = false;
         Visibility();
         LoadLibrary();
+    }
+    void UsagePreview() {
+        const auto path = ExecutableDirectory() / L"Scripts" / L"10 - Custom Script Interface.igc";
+        if (std::filesystem::exists(path))
+            SetSource(ScriptStorage::Read(path), {}, false);
+        ConfigureParameters(ScriptCompiler::Compile(source_));
+        usage_ = true;
+        Visibility();
+        Layout();
+        UpdateMonitor();
     }
 };
 
@@ -2499,31 +2719,34 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     const auto compoundSource = source_;
     bool compoundRetained = true, negationStable = true;
     for (int i = 0; i < 8; ++i) {
-        SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::Not),
-                     0);
+        SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL,
+                     static_cast<WPARAM>(VisualConditionKind::Not), 0);
         formDirty_ = true;
         compoundRetained = compoundRetained && FlushForm(true, ConditionKind) &&
                            document_->Macros.back().Condition->Children.size() == 1 &&
                            document_->Macros.back().Condition->Children.front().Children.size() == 3;
         if (!compoundRetained)
             break;
-        SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::All),
-                     0);
+        SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL,
+                     static_cast<WPARAM>(VisualConditionKind::All), 0);
         formDirty_ = true;
         negationStable = negationStable && FlushForm(true, ConditionKind) && source_ == compoundSource;
         if (!negationStable)
             break;
     }
     require(compoundRetained, "Negating a compound trigger retains all buttons and axis thresholds");
-    require(negationStable, "Repeated negation toggles restore the exact trigger without growing its depth");
+    require(negationStable,
+            "Repeated negation toggles restore the exact trigger without growing its depth");
     condition_ = {1};
     BuildForm();
-    SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::Not), 0);
+    SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::Not),
+                 0);
     formDirty_ = true;
     require(FlushForm(true, ConditionKind) &&
                 document_->Macros.back().Condition->Children[1].Children.front().Control == "EAST",
             "Negating a configured leaf retains its original controller button");
-    SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::Held), 0);
+    SendMessageW(fields_.at(ConditionKind), CB_SETCURSEL, static_cast<WPARAM>(VisualConditionKind::Held),
+                 0);
     formDirty_ = true;
     require(FlushForm(true, ConditionKind) && source_ == compoundSource,
             "Removing a leaf negation restores its exact prior condition");
@@ -2575,11 +2798,13 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     Find();
     CHARRANGE selection{};
     SendMessageW(controls_[Code], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selection));
-    require(selection.cpMax - selection.cpMin == 2, "Native code search selects the matching control name");
+    require(selection.cpMax - selection.cpMin == 2,
+            "Native code search selects the matching control name");
     SetSource("define SETTING_2 = 7; main {}", {}, false);
     EnterVisual();
     Add(AddConstant);
-    require(document_->Constants.size() == 2 && document_->Constants[0].Name != document_->Constants[1].Name,
+    require(document_->Constants.size() == 2 &&
+                document_->Constants[0].Name != document_->Constants[1].Name,
             "New constants automatically avoid existing setting-name collisions");
     auto deep = VisualDocument::Parse("main {}");
     auto deepMacro = VisualDocument::CreateFigureEightPreset();
@@ -2605,7 +2830,8 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     } catch (const std::exception &) {
         structureRejected = true;
     }
-    require(structureRejected && source_ == beforeStructure && document_->BuildSource() == beforeStructure,
+    require(structureRejected && source_ == beforeStructure &&
+                document_->BuildSource() == beforeStructure,
             "Rejected condition-tree edits roll back both source and visual state");
     Command(CodeTab, BN_CLICKED);
     SendMessageW(controls_[Live], BM_SETCHECK, BST_CHECKED, 0);
@@ -2619,7 +2845,8 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     PumpUntil([&] { return accepted_ == newest; });
     require(source_.find("edit 29") != std::string::npos && error_.empty(),
             "Debounced background validation accepts only the newest source");
-    require(!service_ && active_.empty(), "Live apply is harmless without an explicitly started capture");
+    require(!service_ && active_.empty(),
+            "Live apply is harmless without an explicitly started capture");
     RequestInject();
     require(!busy_ && !service_, "Demo mode rejects capture injection");
     SetSource("main { set_val(SOUTH, ); }", {}, true);
@@ -2768,8 +2995,10 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
             fieldsBounded = fieldsBounded && area.left >= 0 && area.right <= formClient.right;
         }
     }
-    require(bounded, "Workspace controls remain within normal, compact, minimum and short desktop bounds");
-    require(separated, "Adaptive toolbars and session controls do not overlap on narrow or short desktops");
+    require(bounded,
+            "Workspace controls remain within normal, compact, minimum and short desktop bounds");
+    require(separated,
+            "Adaptive toolbars and session controls do not overlap on narrow or short desktops");
     require(fieldsBounded,
             "Every visual property remains horizontally reachable in narrow and high-DPI workspaces");
     ResizePreview(1536, 960, 144);
@@ -2782,6 +3011,127 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(source_ == beforeLayout,
             "Resizing and DPI changes preserve exact script text without marking it edited");
     ResizePreview(1440, 930);
+    const std::string custom = R"igc(ui {
+        title("My controller"); slider zone("Deadzone",0,100,10,"%");
+        toggle enabled("Enable",true);
+        select mode("Mode",7) {7:"Normal";42:"Alternative";};
+        number delay_ms("Duration",10,500,80,5," ms");
+    } main {if(enabled) set_val(LX,zone);})igc";
+    const auto settingsPath = directory / L"configurable.igc";
+    ScriptStorage::Write(settingsPath, custom, false);
+    SetSource(custom, settingsPath, false);
+    PumpUntil([&] { return settingsProgram_ && accepted_ == version_; });
+    Command(UseTab, BN_CLICKED);
+    require(usage_ && IsWindowVisible(parameterPanel_->Handle()) && !IsWindowVisible(controls_[Code]) &&
+                !IsWindowVisible(form_) && !IsWindowVisible(controls_[Save]) &&
+                !IsWindowVisible(controls_[Live]),
+            "Use script shows custom settings and session actions without authoring controls");
+    auto panel = parameterPanel_->Handle();
+    auto slider = GetDlgItem(panel, ScriptPanel::FirstInput);
+    SendMessageW(slider, TBM_SETPOS, TRUE, 63);
+    SendMessageW(panel, WM_HSCROLL, TB_THUMBTRACK, reinterpret_cast<LPARAM>(slider));
+    require(parameterValues_[0] == 63 && source_ == custom,
+            "Dragging a declared slider updates its setting without rewriting code");
+    auto toggle = GetDlgItem(panel, ScriptPanel::FirstInput + 1);
+    SendMessageW(toggle, BM_CLICK, 0, 0);
+    require(parameterValues_[1] == 0, "Declared toggles expose boolean script parameters");
+    auto selector = GetDlgItem(panel, ScriptPanel::FirstInput + 2);
+    SendMessageW(selector, CB_SETCURSEL, 1, 0);
+    SendMessageW(panel, WM_COMMAND, MAKEWPARAM(ScriptPanel::FirstInput + 2, CBN_SELENDOK),
+                 reinterpret_cast<LPARAM>(selector));
+    require(parameterValues_[2] == 42, "Dropdowns return declared choice values, not visible indices");
+    auto number = GetDlgItem(panel, ScriptPanel::FirstInput + 3);
+    SetWindowTextW(number, L"175");
+    require(parameterValues_[3] == 175, "Numeric fields publish valid values immediately");
+    SetWindowTextW(number, L"999999999999");
+    require(parameterValues_[3] == 175,
+            "Overflow or out-of-range text never changes the last valid runtime value");
+    PersistParameters();
+    SetSource(initial, {}, false);
+    SetSource(custom, settingsPath, false);
+    PumpUntil([&] { return settingsProgram_ && accepted_ == version_; });
+    require(
+        parameterValues_[0] == 63 && parameterValues_[1] == 0 && parameterValues_[2] == 42 &&
+            parameterValues_[3] == 175,
+        "Per-script settings survive file switches and reloads independently from exact source text");
+    auto configured = settingsProgram_->CreateInstance();
+    configured->SetParameters(parameterValues_);
+    ControlFrame configuredFrame;
+    configuredFrame.Available.fill(true);
+    configured->Execute(configuredFrame, 0, 0);
+    require(configuredFrame.Values[0] == 0, "The usage panel's toggle value reaches the script VM");
+    Command(EditTab, BN_CLICKED);
+    require(!usage_ && (IsWindowVisible(controls_[Code]) || IsWindowVisible(form_)) &&
+                !IsWindowVisible(parameterPanel_->Handle()),
+            "Edit script exposes authoring while keeping the same file and parameter values");
+    EnterVisual();
+    Command(UseTab, BN_CLICKED);
+    require(usage_ && source_ == custom,
+            "Code, visual authoring and usage switches preserve untouched UI declarations");
+    Command(ResetParameters, BN_CLICKED);
+    PersistParameters();
+    require(parameterValues_ == settingsProgram_->Interface().Defaults(),
+            "Reset restores and persists script-defined defaults");
+    auto badSettings = settingsPath.wstring() + L".settings.json";
+    ScriptStorage::Write(badSettings, "{\"schema\":1,\"values\":{\"zone\":18446744073709551615}}",
+                         false);
+    bool rejectedSettings = false;
+    try {
+        (void)ScriptStorage::ReadSettings(settingsPath);
+    } catch (const std::exception &) {
+        rejectedSettings = true;
+    }
+    require(rejectedSettings,
+            "Unsigned settings overflow is rejected instead of wrapping to a valid signed value");
+    ScriptStorage::Write(badSettings, "{\"schema\":1,\"values\":{\"zone\":{\"a\":{\"b\":{\"c\":0}}}}}",
+                         false);
+    rejectedSettings = false;
+    try {
+        (void)ScriptStorage::ReadSettings(settingsPath);
+    } catch (const std::exception &) {
+        rejectedSettings = true;
+    }
+    require(rejectedSettings, "Corrupted settings have bounded nesting and never execute script code");
+    ScriptStorage::WriteSettings(settingsPath, settingsProgram_->Interface(), parameterValues_);
+    const auto adjacent = std::filesystem::path(settingsPath.wstring() + L".settings.json");
+    require(SetFileAttributesW(adjacent.c_str(), FILE_ATTRIBUTE_READONLY) != FALSE,
+            "Prepare a read-only settings sidecar in the test's temporary directory");
+    auto fallbackValues = parameterValues_;
+    fallbackValues[0] = 24;
+    ScriptStorage::WriteSettings(settingsPath, settingsProgram_->Interface(), fallbackValues);
+    const auto fallback = ScriptStorage::SettingsFile(settingsPath);
+    require(fallback != adjacent && ScriptStorage::ReadSettings(settingsPath).at("zone") == 24,
+            "Read-only script folders automatically retain settings in the Windows user profile");
+    SetFileAttributesW(adjacent.c_str(), FILE_ATTRIBUTE_NORMAL);
+    ScriptStorage::WriteSettings(settingsPath, settingsProgram_->Interface(), parameterValues_);
+    require(
+        ScriptStorage::SettingsFile(settingsPath) == adjacent && !std::filesystem::exists(fallback),
+        "A writable script migrates settings back beside the file and removes its obsolete fallback");
+    parameterPanel_->SetDpi(96);
+    const auto gdiBefore = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    const auto userBefore = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        parameterPanel_->SetDpi(cycle % 3 == 0 ? 96 : cycle % 3 == 1 ? 144 : 192);
+        parameterPanel_->Set(settingsProgram_->Interface(), parameterValues_);
+    }
+    parameterPanel_->SetDpi(dpi_);
+    require(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) <= gdiBefore + 2 &&
+                GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS) <= userBefore + 2,
+            "100 parameter-panel rebuild/DPI cycles retain bounded GDI and USER resources");
+    SetFocus(GetDlgItem(parameterPanel_->Handle(), ScriptPanel::FirstInput + 3));
+    RECT parameterFocus{}, parameterViewport{};
+    GetWindowRect(GetDlgItem(parameterPanel_->Handle(), ScriptPanel::FirstInput + 3), &parameterFocus);
+    MapWindowPoints(nullptr, parameterPanel_->Handle(), reinterpret_cast<POINT *>(&parameterFocus), 2);
+    GetClientRect(parameterPanel_->Handle(), &parameterViewport);
+    require(parameterFocus.top >= 0 && parameterFocus.bottom <= parameterViewport.bottom,
+            "Keyboard focus scrolls the custom parameter panel to reveal its last field");
+    for (const auto size : std::vector<POINT>{{1440, 930}, {1120, 720}, {910, 509}}) {
+        ResizePreview(size.x, size.y);
+        require(bounds(parameterPanel_->Handle()).right <= bounds(controls_[Monitor]).left &&
+                    bounds(controls_[UseTab]).right <= bounds(controls_[EditTab]).left,
+                "Usage panel and workspace tabs remain separated at compact sizes");
+    }
+    ResizePreview(1440, 930);
     SetSource(initial, {}, false);
     Command(CodeTab, BN_CLICKED);
     UpdateMonitor();
@@ -2792,8 +3142,8 @@ struct UiEnvironment final {
     HRESULT com = E_FAIL;
     UiEnvironment() {
         com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        INITCOMMONCONTROLSEX controls{sizeof(controls),
-                                      ICC_STANDARD_CLASSES | ICC_TREEVIEW_CLASSES | ICC_LISTVIEW_CLASSES};
+        INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_TREEVIEW_CLASSES |
+                                                            ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES};
         InitCommonControlsEx(&controls);
         rich = LoadLibraryExW(L"Msftedit.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (!rich)
@@ -2843,8 +3193,8 @@ void Screenshot(HWND window, const std::filesystem::path &path, HWND popup = nul
         const auto previous = SelectObject(popupDc, popupBitmap);
         RedrawWindow(popup, nullptr, nullptr, RDW_UPDATENOW | RDW_INVALIDATE);
         PrintWindow(popup, popupDc, 0);
-        BitBlt(memory, popupArea.left - area.left, popupArea.top - area.top, popupWidth, popupHeight, popupDc,
-               0, 0, SRCCOPY);
+        BitBlt(memory, popupArea.left - area.left, popupArea.top - area.top, popupWidth, popupHeight,
+               popupDc, 0, 0, SRCCOPY);
         SelectObject(popupDc, previous);
         DeleteObject(popupBitmap);
         DeleteDC(popupDc);
@@ -2894,12 +3244,13 @@ void Screenshot(HWND window, const std::filesystem::path &path, HWND popup = nul
 int RunApplication(HINSTANCE instance, int show, const std::vector<std::wstring> &arguments) {
     UiEnvironment environment;
     if (Has(arguments, L"--help")) {
-        MessageBoxW(nullptr,
-                    L"GamePadRemapper.exe [--open file.igc] [--demo]\n\n--demo: simulated UI with no driver "
-                    L"access\n--ui-self-test report.json: offline native interface and storage "
-                    L"tests\n--render-tests directory: render the actual native interface\n\nCtrl+Enter "
-                    L"applies; Ctrl+S saves; Ctrl+F finds text.",
-                    L"GamePad Remapper", MB_OK);
+        MessageBoxW(
+            nullptr,
+            L"GamePadRemapper.exe [--open file.igc] [--demo]\n\n--demo: simulated UI with no driver "
+            L"access\n--ui-self-test report.json: offline native interface and storage "
+            L"tests\n--render-tests directory: render the actual native interface\n\nCtrl+Enter "
+            L"applies; Ctrl+S saves; Ctrl+F finds text.",
+            L"GamePad Remapper", MB_OK);
         return 0;
     }
     MainWindow window(instance, Has(arguments, L"--demo"));
@@ -2951,6 +3302,8 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
         if (!renderDirectory.empty()) {
             const std::filesystem::path destination(renderDirectory);
             std::filesystem::create_directories(destination);
+            window.UsagePreview();
+            Screenshot(window.Handle(), destination / L"script-settings.png");
             window.Preview(false);
             window.CodePreview();
             Screenshot(window.Handle(), destination / L"code-editor.png");
@@ -2975,8 +3328,9 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
             const auto widgets = ui::CreateWidgetPreview(GetModuleHandleW(nullptr));
             Screenshot(widgets, destination / L"controls-state.png");
             DestroyWindow(widgets);
-            checks.push_back("Rendered native code, visual, macro, motion, popup, compact, minimum and 150 "
-                             "percent DPI interfaces");
+            checks.push_back(
+                "Rendered native code, visual, macro, motion, popup, compact, minimum and 150 "
+                "percent DPI interfaces");
         }
         output["Passed"] = true;
         output["TemporaryDirectory"] = Utf8(directory.wstring());

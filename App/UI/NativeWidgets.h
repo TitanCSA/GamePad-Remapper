@@ -10,6 +10,7 @@ enum class ButtonKind { Secondary, Primary, Danger, Tab };
 void StyleButton(HWND window, ButtonKind kind = ButtonKind::Secondary);
 void SetButtonSelected(HWND window, bool selected);
 void StyleCheckBox(HWND window);
+void StyleToggle(HWND window);
 void StyleComboBox(HWND window);
 void StyleEdit(HWND window);
 void StyleScrollbars(HWND window);

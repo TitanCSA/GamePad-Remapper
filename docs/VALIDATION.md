@@ -1,5 +1,37 @@
 # Validation
 
+## 2.2.0 script-defined interfaces
+
+Separate Use/Edit workspaces and the `ui` compiler/runtime additions are tested
+with seven offline CTest suites and the native UI self-test in optimized Release
+and AddressSanitizer configurations. Both keep the unchanged 1.0.4.0 user-mode
+SDK and Microsoft-signed controller kernel 1.0.2.0; no new driver signature is
+required. Results are recorded in [validation.json](validation.json).
+
+- Parameter fixtures cover declaration metadata, UTF-8 and escaped labels,
+  groups, steps, enum values, 32-bit limits, invalid declarations and read-only
+  runtime symbols. Ten thousand updates preserve globals, `init` state, waiting
+  combo segments/deadlines and physical press history.
+- Service fixtures cover ten thousand hot publications, an additional concurrent
+  update/evaluation workload, multiple independent devices, new-device settings,
+  invalid/stale-program rejection and preserved explicit reinjection behavior.
+- Native UI checks exercise both workspaces, slider dragging, switches,
+  dropdown values, numeric overflow, exact source preservation, automatic
+  per-file settings, default reset, corrupted JSON, read-only storage fallback
+  and migration, keyboard focus scrolling, compact layouts and 100 panel
+  rebuild/DPI cycles with bounded GDI/USER resources.
+- Visual/code roundtrips preserve interface declarations. Quoted `main`,
+  `define` and visual-marker text cannot be mistaken for source structure.
+- All ten shipped scripts compile and execute. Existing capture conversion,
+  reference parity, script stress, visual-document, widget and snapshot
+  notification tests remain enabled. Native render tests include the settings
+  workspace, code/visual authoring, compact sizes and 150% DPI.
+
+These are software and native-control tests. They do not install/open a driver,
+create capture, measure physical controller latency or establish universal
+hardware compatibility. The older sections below describe their named releases
+and historical live checks, not fresh physical-device tests for 2.2.0.
+
 ## 2.1.1 controller and display update
 
 The embedded SDK is byte-identical to Gamepad & Controller SDK 1.0.4.0.

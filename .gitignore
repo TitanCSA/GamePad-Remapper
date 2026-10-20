@@ -8,3 +8,4 @@ App/.build/
 *.pdb
 *.log
 *.tmp
+*.igc.settings.json

@@ -21,6 +21,7 @@ struct State {
     ControlKind Kind = ControlKind::None;
     ButtonKind Button = ButtonKind::Secondary;
     bool Hover = false, Selected = false, Scrollbars = false;
+    bool Toggle = false;
     UINT Dpi = 0;
     int DragBar = -1, DragOffset = 0;
     int RepeatBar = -1, RepeatAction = 0;
@@ -116,11 +117,13 @@ State *Get(HWND window) {
 }
 State *Existing(HWND window) {
     DWORD_PTR reference = 0;
-    return GetWindowSubclass(window, Procedure, SubclassId, &reference) ? reinterpret_cast<State *>(reference)
-                                                                        : nullptr;
+    return GetWindowSubclass(window, Procedure, SubclassId, &reference)
+               ? reinterpret_cast<State *>(reference)
+               : nullptr;
 }
 void Frame(HDC dc, RECT rectangle, COLORREF colour, int width = 1) {
-    for (int i = 0; i < width && rectangle.right > rectangle.left && rectangle.bottom > rectangle.top; ++i) {
+    for (int i = 0; i < width && rectangle.right > rectangle.left && rectangle.bottom > rectangle.top;
+         ++i) {
         FrameRect(dc, &rectangle, Brush(colour));
         InflateRect(&rectangle, -1, -1);
     }
@@ -177,6 +180,24 @@ void DrawCheck(HWND window, HDC dc, const State &state) {
     FillRect(dc, &rectangle, Brush(Black));
     const bool enabled = IsWindowEnabled(window) != FALSE;
     const auto checked = SendMessageW(window, BM_GETCHECK, 0, 0);
+    if (state.Toggle) {
+        const int height = Scale(window, state, 24), width = Scale(window, state, 44);
+        const int top = (rectangle.bottom - height) / 2;
+        RECT track{Scale(window, state, 2), top, Scale(window, state, 2) + width, top + height};
+        Rounded(dc, track, enabled && checked ? Blue : Black,
+                enabled && (state.Hover || checked || GetFocus() == window) ? Blue : Gray, height);
+        const int margin = Scale(window, state, 4), diameter = height - 2 * margin;
+        const int left = checked ? track.right - margin - diameter : track.left + margin;
+        SelectObject(dc, Brush(enabled ? White : Gray));
+        SelectObject(dc, GetStockObject(NULL_PEN));
+        Ellipse(dc, left, top + margin, left + diameter, top + margin + diameter);
+        rectangle.left = track.right + Scale(window, state, 12);
+        Caption(dc, window, rectangle, enabled ? White : Gray,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (GetFocus() == window)
+            Frame(dc, rectangle, Blue);
+        return;
+    }
     const int size = Scale(window, state, 18);
     const int left = Scale(window, state, 2), top = (rectangle.bottom - size) / 2;
     RECT box{left, top, left + size, top + size};
@@ -212,8 +233,8 @@ std::wstring ComboText(HWND window, int index) {
     if (length == CB_ERR || length < 0 || length > 32768)
         return {};
     std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
-    const auto count =
-        SendMessageW(window, CB_GETLBTEXT, static_cast<WPARAM>(index), reinterpret_cast<LPARAM>(text.data()));
+    const auto count = SendMessageW(window, CB_GETLBTEXT, static_cast<WPARAM>(index),
+                                    reinterpret_cast<LPARAM>(text.data()));
     text.resize(static_cast<std::size_t>(std::max<LRESULT>(0, count == CB_ERR ? 0 : count)));
     return text;
 }
@@ -346,7 +367,8 @@ Bar ScrollBar(HWND window, int bar) {
         result.Thumb.right = result.Bounds.left + info.xyThumbBottom;
         InflateRect(&result.Thumb, 0, -4);
     }
-    result.Visible = result.Bounds.right > result.Bounds.left && result.Bounds.bottom > result.Bounds.top;
+    result.Visible =
+        result.Bounds.right > result.Bounds.left && result.Bounds.bottom > result.Bounds.top;
     return result;
 }
 void PaintScrollbars(HWND window, const State &state, HDC target = nullptr) {
@@ -418,8 +440,9 @@ POINT WindowPoint(HWND window, LPARAM coordinate, bool screen) {
     return point;
 }
 void ScrollTo(HWND window, int which, int position, const Bar &bar) {
-    const int maximum = std::max(
-        bar.Scroll.nMin, bar.Scroll.nMax - static_cast<int>(bar.Scroll.nPage ? bar.Scroll.nPage - 1 : 0));
+    const int maximum =
+        std::max(bar.Scroll.nMin,
+                 bar.Scroll.nMax - static_cast<int>(bar.Scroll.nPage ? bar.Scroll.nPage - 1 : 0));
     position = std::clamp(position, bar.Scroll.nMin, maximum);
     wchar_t name[64]{};
     GetClassNameW(window, name, static_cast<int>(std::size(name)));
@@ -434,7 +457,8 @@ void ScrollTo(HWND window, int which, int position, const Bar &bar) {
         SendMessageW(window, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&point));
     } else if (_wcsicmp(name, L"Edit") == 0) {
         const int change = position - bar.Scroll.nPos;
-        SendMessageW(window, EM_LINESCROLL, which == SB_HORZ ? change : 0, which == SB_VERT ? change : 0);
+        SendMessageW(window, EM_LINESCROLL, which == SB_HORZ ? change : 0,
+                     which == SB_VERT ? change : 0);
     } else {
         SCROLLINFO setting{sizeof(setting), SIF_POS, 0, 0, 0, position, 0};
         SetScrollInfo(window, which, &setting, FALSE);
@@ -461,7 +485,9 @@ bool BeginScroll(HWND window, State &state, LPARAM coordinate) {
         } else {
             const bool line = cursor < trackFirst || cursor >= trackLast;
             const bool before = cursor < first;
-            const int action = line ? before ? SB_LINEUP : SB_LINEDOWN : before ? SB_PAGEUP : SB_PAGEDOWN;
+            const int action = line     ? before ? SB_LINEUP : SB_LINEDOWN
+                               : before ? SB_PAGEUP
+                                        : SB_PAGEDOWN;
             SendMessageW(window, vertical ? WM_VSCROLL : WM_HSCROLL, static_cast<WPARAM>(action), 0);
             if (!state.Destroyed) {
                 state.RepeatBar = which;
@@ -489,14 +515,16 @@ void DragScroll(HWND window, State &state, LPARAM coordinate) {
         return;
     const int offset =
         std::clamp(static_cast<int>(vertical ? point.y : point.x) - first - state.DragOffset, 0, travel);
-    const int maximum = std::max(
-        bar.Scroll.nMin, bar.Scroll.nMax - static_cast<int>(bar.Scroll.nPage ? bar.Scroll.nPage - 1 : 0));
+    const int maximum =
+        std::max(bar.Scroll.nMin,
+                 bar.Scroll.nMax - static_cast<int>(bar.Scroll.nPage ? bar.Scroll.nPage - 1 : 0));
     const auto position = static_cast<int>(bar.Scroll.nMin + static_cast<long long>(offset) *
                                                                  (maximum - bar.Scroll.nMin) / travel);
     ScrollTo(window, state.DragBar, position, bar);
     PaintScrollbars(window, state);
 }
-LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR reference) {
+LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR,
+                           DWORD_PTR reference) {
     auto *state = reinterpret_cast<State *>(reference);
     StateReference lifetime(state);
     if (message == WM_NCDESTROY) {
@@ -531,7 +559,8 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
             return 1;
         }
         if (state->Kind == ControlKind::Combo &&
-            (message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX || message == WM_CTLCOLORSTATIC)) {
+            (message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX ||
+             message == WM_CTLCOLORSTATIC)) {
             SetBkColor(reinterpret_cast<HDC>(w), Black);
             SetTextColor(reinterpret_cast<HDC>(w), IsWindowEnabled(window) ? White : Gray);
             return reinterpret_cast<LRESULT>(Brush(Black));
@@ -627,17 +656,19 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
         if (state->Kind == ControlKind::Combo &&
             (message == WM_SETFONT || message == WM_DPICHANGED_AFTERPARENT))
             ComboMetrics(window, *state);
-        if (state->Kind == ControlKind::Combo && (message == CB_ADDSTRING || message == CB_INSERTSTRING) &&
-            result >= 0)
+        if (state->Kind == ControlKind::Combo &&
+            (message == CB_ADDSTRING || message == CB_INSERTSTRING) && result >= 0)
             ExpandComboWidth(window, static_cast<int>(result), *state);
         if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE ||
             message == WM_SETTEXT || message == WM_UPDATEUISTATE || message == WM_LBUTTONDOWN ||
             message == WM_LBUTTONUP || message == BM_SETSTATE || message == BM_SETCHECK ||
-            message == CB_SETCURSEL || message == CB_SHOWDROPDOWN || message == WM_DPICHANGED_AFTERPARENT)
+            message == CB_SETCURSEL || message == CB_SHOWDROPDOWN ||
+            message == WM_DPICHANGED_AFTERPARENT)
             InvalidateRect(window, nullptr, FALSE);
-        if (state->Scrollbars && (message == WM_NCPAINT || message == WM_VSCROLL || message == WM_HSCROLL ||
-                                  message == WM_MOUSEWHEEL || message == WM_SIZE || message == WM_SETTEXT ||
-                                  message == WM_NCMOUSEMOVE || message == WM_CAPTURECHANGED))
+        if (state->Scrollbars &&
+            (message == WM_NCPAINT || message == WM_VSCROLL || message == WM_HSCROLL ||
+             message == WM_MOUSEWHEEL || message == WM_SIZE || message == WM_SETTEXT ||
+             message == WM_NCMOUSEMOVE || message == WM_CAPTURECHANGED))
             PaintScrollbars(window, *state);
         return result;
     } catch (...) {
@@ -669,6 +700,13 @@ void StyleCheckBox(HWND window) {
     SetWindowTheme(window, L"", L"");
     Repaint(window);
 }
+void StyleToggle(HWND window) {
+    StyleCheckBox(window);
+    if (window) {
+        Get(window)->Toggle = true;
+        Repaint(window);
+    }
+}
 void StyleComboBox(HWND window) {
     if (!window)
         return;
@@ -679,7 +717,8 @@ void StyleComboBox(HWND window) {
     SetWindowTheme(window, L"", L"");
     ComboMetrics(window, *state);
     COMBOBOXINFO info{sizeof(info)};
-    if ((style & CBS_DROPDOWNLIST) != CBS_DROPDOWNLIST && GetComboBoxInfo(window, &info) && info.hwndItem) {
+    if ((style & CBS_DROPDOWNLIST) != CBS_DROPDOWNLIST && GetComboBoxInfo(window, &info) &&
+        info.hwndItem) {
         StyleEdit(info.hwndItem);
         Get(info.hwndItem)->EmbeddedEdit = true;
     }
@@ -732,8 +771,9 @@ void SetAccessibleName(HWND window, const wchar_t *name) {
     if (!window || !name)
         return;
     auto *state = Get(window);
-    if (!state->Accessibility && FAILED(CoCreateInstance(CLSID_AccPropServices, nullptr, CLSCTX_INPROC_SERVER,
-                                                         IID_PPV_ARGS(&state->Accessibility))))
+    if (!state->Accessibility &&
+        FAILED(CoCreateInstance(CLSID_AccPropServices, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&state->Accessibility))))
         return;
     state->Accessibility->SetHwndPropStr(window, static_cast<DWORD>(OBJID_CLIENT), CHILDID_SELF,
                                          PROPID_ACC_NAME, name);
@@ -815,9 +855,9 @@ HWND CreateWidgetPreview(HINSTANCE instance) {
     const UINT dpi = GetDpiForSystem();
     const auto s = [dpi](int value) { return MulDiv(value, static_cast<int>(dpi), 96); };
     const auto font = [dpi](int size, int weight) {
-        return CreateFontW(-MulDiv(size, static_cast<int>(dpi), 96), 0, 0, 0, weight, FALSE, FALSE, FALSE,
-                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH, L"Segoe UI");
+        return CreateFontW(-MulDiv(size, static_cast<int>(dpi), 96), 0, 0, 0, weight, FALSE, FALSE,
+                           FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                           CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     };
     context->Body = font(15, FW_NORMAL);
     context->Heading = font(22, FW_SEMIBOLD);
@@ -826,17 +866,17 @@ HWND CreateWidgetPreview(HINSTANCE instance) {
     AdjustWindowRectExForDpi(&bounds, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, 0, dpi);
     HWND window = CreateWindowExW(0, type.lpszClassName, L"GamePad Remapper - Controls",
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
-                                  bounds.right - bounds.left, bounds.bottom - bounds.top, nullptr, nullptr,
-                                  instance, context.get());
+                                  bounds.right - bounds.left, bounds.bottom - bounds.top, nullptr,
+                                  nullptr, instance, context.get());
     if (!window)
         throw std::runtime_error("The component preview window could not be created.");
     auto *owned = context.release();
     owned->OwnedByWindow = true;
-    const auto child = [&](const wchar_t *kind, const wchar_t *caption, DWORD style, int id, int x, int y,
-                           int width, int height, HFONT chosen = nullptr) {
-        HWND result =
-            CreateWindowExW(0, kind, caption, WS_CHILD | WS_VISIBLE | style, s(x), s(y), s(width), s(height),
-                            window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
+    const auto child = [&](const wchar_t *kind, const wchar_t *caption, DWORD style, int id, int x,
+                           int y, int width, int height, HFONT chosen = nullptr) {
+        HWND result = CreateWindowExW(
+            0, kind, caption, WS_CHILD | WS_VISIBLE | style, s(x), s(y), s(width), s(height), window,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
         if (!result)
             throw std::runtime_error("A component preview control could not be created.");
         SendMessageW(result, WM_SETFONT, reinterpret_cast<WPARAM>(chosen ? chosen : owned->Body), FALSE);
@@ -844,8 +884,8 @@ HWND CreateWidgetPreview(HINSTANCE instance) {
     };
     try {
         child(L"STATIC", L"Controls and interaction", 0, 101, 32, 24, 800, 32, owned->Heading);
-        child(L"STATIC", L"Blue, black, white and gray. Clear states for every action.", 0, 1, 32, 66, 820,
-              24, owned->Small);
+        child(L"STATIC", L"Blue, black, white and gray. Clear states for every action.", 0, 1, 32, 66,
+              820, 24, owned->Small);
         const wchar_t *labels[] = {L"Primary action", L"Hover", L"Keyboard focus", L"Unavailable"};
         const wchar_t *captions[] = {L"Apply script", L"Open script", L"Save changes", L"Disabled"};
         HWND focused = nullptr;
@@ -874,8 +914,8 @@ HWND CreateWidgetPreview(HINSTANCE instance) {
         EnableWindow(disabled, FALSE);
         child(L"STATIC", L"Activation", 0, 11, 32, 336, 300, 22, owned->Small);
         const auto combo =
-            child(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 130, 32,
-                  367, 300, 180);
+            child(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 130,
+                  32, 367, 300, 180);
         StyleComboBox(combo);
         for (const wchar_t *caption :
              {L"While condition is true", L"On activation", L"On deactivation", L"Toggle"})
@@ -885,8 +925,8 @@ HWND CreateWidgetPreview(HINSTANCE instance) {
         const auto edit =
             child(L"EDIT", L"Everyday controller", ES_AUTOHSCROLL | WS_TABSTOP, 131, 360, 367, 300, 36);
         StyleEdit(edit);
-        child(L"STATIC", L"Each control keeps Windows keyboard and accessibility support.", 0, 13, 32, 435,
-              840, 24, owned->Small);
+        child(L"STATIC", L"Each control keeps Windows keyboard and accessibility support.", 0, 13, 32,
+              435, 840, 24, owned->Small);
         ShowWindow(window, SW_SHOWNOACTIVATE);
         SendMessageW(focused, WM_UPDATEUISTATE, MAKEWPARAM(UIS_CLEAR, UISF_HIDEFOCUS), 0);
         SetFocus(focused);

@@ -6,6 +6,7 @@ namespace gpr::detail {
 enum class Op {
     Push,
     Load,
+    LoadParameter,
     Store,
     LoadLocal,
     StoreLocal,
@@ -44,7 +45,7 @@ enum class Op {
 struct Token {
     std::string Text;
     int Number = 0, Line = 1, Column = 1;
-    bool IsNumber = false, IsIdentifier = false;
+    bool IsNumber = false, IsIdentifier = false, IsString = false;
     Token(std::string text = "", int line = 1, int column = 1, int number = 0, bool numeric = false,
           bool identifier = false)
         : Text(std::move(text)), Number(number), Line(line), Column(column), IsNumber(numeric),
@@ -65,6 +66,7 @@ struct ProgramData {
     std::vector<CodeBlock> Blocks;
     int GlobalCount = 0, Init = 0, Main = 0;
     std::vector<int> ComboBlocks;
+    ScriptInterface Interface;
 };
 const std::vector<std::string> &BuiltinNames();
 int FindBuiltin(const std::string &name);

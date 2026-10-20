@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <atomic>
+#include <thread>
 
 // Deterministic callback-boundary test backend. This executable never links
 // the SDK or real capture worker and cannot create a driver context.
@@ -16,7 +18,7 @@ bool exposeDevice = false;
 std::array<int, 256> lastOutput{};
 int lastWake = 0;
 std::uint32_t startError = 0;
-int starts = 0, stops = 0, checks = 0;
+int starts = 0, stops = 0, checks = 0, parameterWakes = 0;
 void Check(bool condition, const char *reason) {
     ++checks;
     if (!condition)
@@ -28,7 +30,8 @@ int Invoke(std::uint32_t key, int input = 20, std::uint32_t flags = 0) {
     physical[0] = input;
     physical[1] = -13;
     available.fill(1);
-    const auto next = callback(key, 6, physical.data(), available.data(), output.data(), flags, callbackUser);
+    const auto next =
+        callback(key, 6, physical.data(), available.data(), output.data(), flags, callbackUser);
     lastOutput = output;
     lastWake = next;
     if (next < 0) {
@@ -67,6 +70,7 @@ void __cdecl GR_Stop() {
     callbackUser = nullptr;
 }
 void __cdecl GR_Wake() {}
+void __cdecl GR_ParametersChanged() { ++parameterWakes; }
 std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot *output) {
     if (!output || output->size != sizeof(*output))
         return ERROR_INVALID_PARAMETER;
@@ -97,9 +101,10 @@ int main() {
         service.Inject(counting);
         Check(Invoke(1, 20, 2) == 1 && Invoke(2, 20, 2) == 1 && Invoke(1) == 2,
               "Reinjecting the same program resets once without dropping a previous reset source.");
-        Check(
-            service.TryUpdate(counting) && Invoke(1, 20, 2) == 1 && Invoke(2, 20, 2) == 1 && Invoke(1) == 2,
-            "Live replacement of the same shared program also owns a fresh reset generation across sources.");
+        Check(service.TryUpdate(counting) && Invoke(1, 20, 2) == 1 && Invoke(2, 20, 2) == 1 &&
+                  Invoke(1) == 2,
+              "Live replacement of the same shared program also owns a fresh reset generation across "
+              "sources.");
         const auto startsBeforeNull = starts;
         bool rejectedNull = false;
         try {
@@ -155,8 +160,9 @@ int main() {
         snapshot.device_count = 1;
         auto detached = service.GetSnapshot();
         Check(detached.Devices.size() == 1 && detached.Devices[0].Name == "Controller \xc3\xa9" &&
-                  detached.Devices[0].Token == "capture-local-token" && detached.Devices[0].Available[96] &&
-                  detached.Devices[0].Values[96] == -40 && detached.Devices[0].OutputValues[96] == 30,
+                  detached.Devices[0].Token == "capture-local-token" &&
+                  detached.Devices[0].Available[96] && detached.Devices[0].Values[96] == -40 &&
+                  detached.Devices[0].OutputValues[96] == 30,
               "Detached snapshots preserve UTF-8 identity, availability and physical/output arrays.");
         detached.Devices[0].Values[96] = 99;
         detached.Devices[0].OutputValues[96] = 99;
@@ -167,13 +173,14 @@ int main() {
               "A consumer cannot mutate the native snapshot or subsequent service snapshots.");
         exposeDevice = false;
         snapshot.device_count = 0;
-        service.Inject(
-            ScriptCompiler::Compile("main "
-                                    "{set_val(VALUE_1,get_device());set_val(VALUE_2,get_controller());if(is_"
-                                    "available(LX)){set_val(LX,50);tick(4);}}"));
+        service.Inject(ScriptCompiler::Compile(
+            "main "
+            "{set_val(VALUE_1,get_device());set_val(VALUE_2,get_controller());if(is_"
+            "available(LX)){set_val(LX,50);tick(4);}}"));
         Check(Invoke(73) == 50 && lastWake == 4 && lastOutput[208] == 73 && lastOutput[209] == 6,
               "Callbacks propagate family, capture-local device identity and scoped scheduling.");
-        service.Inject(ScriptCompiler::Compile("int zero; main { set_val(LY,99);set_val(LX,100/zero); }"));
+        service.Inject(
+            ScriptCompiler::Compile("int zero; main { set_val(LY,99);set_val(LX,100/zero); }"));
         Check(Invoke(1, 28) == 28 && lastOutput[1] == -13,
               "A script fault forwards every original physical value after partial modifications.");
         const auto fault = service.GetSnapshot();
@@ -202,6 +209,71 @@ int main() {
         startError = 0;
         service.Inject(counting);
         Check(Invoke(1) == 1, "Startup failure leaves the service reusable.");
+        service.Stop();
+        const auto configurable =
+            ScriptCompiler::Compile("ui {slider gain(\"Gain\",0,100,20);} int count; main "
+                                    "{count++;set_val(LX,gain);set_val(VALUE_1,count);}");
+        auto parameters = configurable->Interface().Defaults();
+        Check(!service.SetParameters(configurable, parameters),
+              "Editing parameters cannot start capture.");
+        service.Inject(configurable, parameters);
+        Check(Invoke(1) == 20 && lastOutput[208] == 1 && Invoke(2) == 20,
+              "Defaults reach every source.");
+        const auto startsBeforeParameters = starts;
+        for (int i = 0; i < 10000; ++i) {
+            parameters[0] = i % 101;
+            Check(service.SetParameters(configurable, parameters) && Invoke(1, 20, 4) == parameters[0] &&
+                      lastOutput[208] == i + 2,
+                  "10,000 parameter updates preserve VM globals and capture ownership.");
+        }
+        Check(starts == startsBeforeParameters && parameterWakes == 10000,
+              "Parameter edits wake evaluation without restarting capture.");
+        Check(Invoke(2) == parameters[0] && lastOutput[208] == 2 && Invoke(3) == parameters[0] &&
+                  lastOutput[208] == 1,
+              "Existing and newly attached devices use the current settings with independent VM state.");
+        Check(!service.SetParameters(counting, parameters),
+              "An old or different script cannot update the active program's settings.");
+        bool invalidParameters = false;
+        parameters[0] = 101;
+        try {
+            service.SetParameters(configurable, parameters);
+        } catch (const std::invalid_argument &) {
+            invalidParameters = true;
+        }
+        Check(invalidParameters && service.IsRunning(),
+              "Invalid settings leave the running program untouched.");
+        service.Inject(configurable);
+        Check(Invoke(1) == 20 && lastOutput[208] == 1,
+              "Explicit reinjection still resets state even with the same program pointer.");
+        std::atomic<bool> finished{false};
+        std::atomic<int> concurrentFrames{0};
+        std::atomic<bool> monotonic{true};
+        std::thread worker([&] {
+            int previousCount = 1;
+            while (!finished.load(std::memory_order_acquire)) {
+                const int output = Invoke(1);
+                if (output < 0 || output > 100 || lastOutput[208] != ++previousCount)
+                    monotonic.store(false);
+                concurrentFrames.fetch_add(1, std::memory_order_release);
+            }
+        });
+        try {
+            while (concurrentFrames.load(std::memory_order_acquire) < 1000)
+                std::this_thread::yield();
+            for (int i = 0; i < 10000; ++i) {
+                parameters[0] = i % 101;
+                service.SetParameters(configurable, parameters);
+            }
+        } catch (...) {
+            finished.store(true, std::memory_order_release);
+            worker.join();
+            throw;
+        }
+        finished.store(true, std::memory_order_release);
+        worker.join();
+        Check(monotonic.load() && concurrentFrames.load() >= 1000 && service.IsRunning(),
+              "Concurrent parameter publication preserves whole valid snapshots and never resets the "
+              "running VM.");
         service.Stop();
         std::printf("Service boundary checks passed: %d; fake backend, no driver access\n", checks);
         return 0;

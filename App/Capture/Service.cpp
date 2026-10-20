@@ -19,7 +19,8 @@ std::string Utf8(const wchar_t *text) {
     if (length <= 0)
         return "Invalid Windows diagnostic text";
     std::string result(static_cast<std::size_t>(length), '\0');
-    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, result.data(), length, nullptr, nullptr);
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, result.data(), length, nullptr,
+                        nullptr);
     result.pop_back();
     return result;
 }
@@ -37,7 +38,11 @@ GR_Snapshot NativeSnapshot() {
 struct RemapperService::Impl {
     struct ProgramSlot {
         std::shared_ptr<const ScriptProgram> Program;
-        explicit ProgramSlot(std::shared_ptr<const ScriptProgram> program) : Program(std::move(program)) {}
+        ParameterValues Values;
+        std::uint64_t Generation;
+        ProgramSlot(std::shared_ptr<const ScriptProgram> program, const ParameterValues &values,
+                    std::uint64_t generation)
+            : Program(std::move(program)), Values(values), Generation(generation) {}
     };
     struct RuntimeDevice {
         std::unique_ptr<ScriptInstance> Script;
@@ -49,6 +54,7 @@ struct RemapperService::Impl {
     std::shared_ptr<const ProgramSlot> pending, executing;
     std::string startupMessage, callbackError;
     bool started = false;
+    std::uint64_t generation = 0;
     ServiceSnapshot cached;
 
     Impl() {
@@ -72,7 +78,11 @@ struct RemapperService::Impl {
             }
             const auto current = std::atomic_load_explicit(&self.pending, std::memory_order_acquire);
             if (current != self.executing) {
-                self.devices.clear();
+                if (!current || !self.executing || current->Generation != self.executing->Generation)
+                    self.devices.clear();
+                else
+                    for (auto &entry : self.devices)
+                        entry.second.Script->SetParameters(current->Values);
                 self.executing = current;
             }
             if (!current) {
@@ -83,6 +93,7 @@ struct RemapperService::Impl {
             if (found == self.devices.end()) {
                 RuntimeDevice device;
                 device.Script = current->Program->CreateInstance();
+                device.Script->SetParameters(current->Values);
                 found = self.devices.emplace(key, std::move(device)).first;
             }
             auto &device = found->second;
@@ -133,10 +144,20 @@ RemapperService::~RemapperService() {
 void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program) {
     if (!program)
         throw std::invalid_argument("A compiled script is required.");
+    const auto values = program->Interface().Defaults();
+    Inject(std::move(program), values);
+}
+void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program,
+                             const ParameterValues &values) {
+    if (!program)
+        throw std::invalid_argument("A compiled script is required.");
+    program->Interface().Validate(values);
     auto &self = *impl_;
     std::lock_guard<std::mutex> lock(self.gate);
-    std::atomic_store_explicit(&self.pending, std::make_shared<const Impl::ProgramSlot>(std::move(program)),
-                               std::memory_order_release);
+    std::atomic_store_explicit(
+        &self.pending,
+        std::make_shared<const Impl::ProgramSlot>(std::move(program), values, ++self.generation),
+        std::memory_order_release);
     self.SetError({});
     if (self.started && NativeSnapshot().running) {
         GR_Wake();
@@ -164,14 +185,40 @@ void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program) {
 bool RemapperService::TryUpdate(std::shared_ptr<const ScriptProgram> program) {
     if (!program)
         throw std::invalid_argument("A compiled script is required.");
+    const auto values = program->Interface().Defaults();
+    return TryUpdate(std::move(program), values);
+}
+bool RemapperService::TryUpdate(std::shared_ptr<const ScriptProgram> program,
+                                const ParameterValues &values) {
+    if (!program)
+        throw std::invalid_argument("A compiled script is required.");
+    program->Interface().Validate(values);
     auto &self = *impl_;
     std::lock_guard<std::mutex> lock(self.gate);
     if (!self.started || !NativeSnapshot().running)
         return false;
-    std::atomic_store_explicit(&self.pending, std::make_shared<const Impl::ProgramSlot>(std::move(program)),
-                               std::memory_order_release);
+    std::atomic_store_explicit(
+        &self.pending,
+        std::make_shared<const Impl::ProgramSlot>(std::move(program), values, ++self.generation),
+        std::memory_order_release);
     self.SetError({});
     GR_Wake();
+    return true;
+}
+bool RemapperService::SetParameters(const std::shared_ptr<const ScriptProgram> &program,
+                                    const ParameterValues &values) {
+    if (!program)
+        throw std::invalid_argument("A compiled script is required.");
+    program->Interface().Validate(values);
+    auto &self = *impl_;
+    std::lock_guard<std::mutex> lock(self.gate);
+    const auto current = std::atomic_load_explicit(&self.pending, std::memory_order_acquire);
+    if (!self.started || !current || current->Program != program || !NativeSnapshot().running)
+        return false;
+    std::atomic_store_explicit(
+        &self.pending, std::make_shared<const Impl::ProgramSlot>(program, values, current->Generation),
+        std::memory_order_release);
+    GR_ParametersChanged();
     return true;
 }
 void RemapperService::Stop() {
