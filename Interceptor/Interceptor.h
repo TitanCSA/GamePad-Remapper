@@ -22,7 +22,7 @@
 #define IC_SDK_SERVICE L"InterceptorGamepadController"
 #define IC_SDK_DOS_DEVICE L"\\\\.\\InterceptorGamepadController"
 
-// Interceptor SDK 1.0.0.0. Compile Interceptor.cpp once alongside your application.
+// Interceptor SDK 1.0.4.0. Compile Interceptor.cpp once alongside your application.
 // This header has no local-header dependencies. Windows x64, C++17.
 
 // ---- Interceptor.h ----

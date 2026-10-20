@@ -38,3 +38,7 @@ GR_API void __cdecl GR_Stop();
 GR_API void __cdecl GR_Wake();
 GR_API std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot *snapshot);
 GR_API std::uint32_t __cdecl GR_GetDevice(std::uint32_t index, GR_Device *device);
+// UI notification only; no driver access. Attach nullptr before destroying the
+// window. Acknowledge the posted WPARAM generation before reading a snapshot.
+GR_API void __cdecl GR_SetSnapshotWindow(HWND window, UINT message);
+GR_API BOOL __cdecl GR_AcknowledgeSnapshot(HWND window, ULONG_PTR generation);

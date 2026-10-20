@@ -8,6 +8,14 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
+**2.1.1 update:** embeds SDK 1.0.4.0, retaining pending HID/XInputHID/XUSB
+collection readers and preserving exact native startup errors. Live state is
+published after forwarding and delivered through coalesced UI notifications;
+the former 100 ms publication and 150 ms monitor intervals are removed.
+Script timing keeps its own deadlines. Includes the complete updated controller
+installer with Microsoft-signed kernel 1.0.2.0, also available separately below
+the portable ZIP in this release.
+
 | Write code | Edit visually |
 | --- | --- |
 | ![IGC code editor; simulated device preview](docs/images/code-editor.png) | ![Visual remapping and macro editor; simulated device preview](docs/images/visual-editor.png) |
@@ -50,7 +58,7 @@ settings and live session easy to distinguish.
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.1.0-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.1.1-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
    If requested, use Windows **Restart**, then reopen the installer to complete

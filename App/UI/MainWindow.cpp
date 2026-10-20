@@ -4,6 +4,7 @@
 #include "NativeWidgets.h"
 #include "../Core/VisualDocument.h"
 #include "../Capture/Service.h"
+#include "../Capture/Bridge.h"
 #include "../ThirdParty/json.hpp"
 #include <CommCtrl.h>
 #include <CommDlg.h>
@@ -31,6 +32,7 @@ namespace {
 constexpr COLORREF Background = ui::Black, Panel = ui::Black, Raised = ui::Black, Edge = ui::Gray,
                    Ink = ui::White, Muted = ui::Gray, Accent = ui::Blue, Mint = ui::White, Danger = ui::White;
 constexpr UINT CompiledMessage = WM_APP + 20, OperationMessage = WM_APP + 21;
+constexpr UINT SnapshotMessage = WM_APP + 27;
 enum Id {
     Library = 100,
     NewFile,
@@ -1823,7 +1825,8 @@ class MainWindow final {
         if (!snapshot_.Running)
             active_.clear();
         EnableWindow(controls_[Stop], snapshot_.Running);
-        SetTimer(window_, 1, snapshot_.Running ? 150 : 1000, nullptr);
+        // A slow health refresh is independent of event-driven input display.
+        SetTimer(window_, 1, 1000, nullptr);
         UpdateMonitor();
         RECT area{};
         GetClientRect(window_, &area);
@@ -2212,6 +2215,14 @@ class MainWindow final {
         case WM_APP + 26:
             Reveal(reinterpret_cast<HWND>(l));
             return 0;
+        case SnapshotMessage:
+            if (GR_AcknowledgeSnapshot(window_, static_cast<ULONG_PTR>(w))) {
+                Refresh();
+                // WM_PAINT is lower priority than posted messages. Flush only
+                // dirty regions so a fast input stream cannot starve painting.
+                RedrawWindow(window_, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+            }
+            return 0;
         case WM_TIMER:
             if (w == 1)
                 Refresh();
@@ -2242,6 +2253,7 @@ class MainWindow final {
             Close();
             return 0;
         case WM_DESTROY:
+            if (!demo_) GR_SetSnapshotWindow(nullptr, 0);
             KillTimer(window_, 1);
             KillTimer(window_, 2);
             PostQuitMessage(0);
@@ -2296,8 +2308,10 @@ class MainWindow final {
         Busy(false);
         UpdateMonitor();
         SetTimer(window_, 1, 1000, nullptr);
+        if (!demo_) GR_SetSnapshotWindow(window_, SnapshotMessage);
     }
     ~MainWindow() {
+        if (!demo_) GR_SetSnapshotWindow(nullptr, 0);
         compiler_.reset();
         drafts_.reset();
         if (operation_.joinable())

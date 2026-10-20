@@ -4,6 +4,7 @@
 #include "Bridge.h"
 #include "ControlCodec.h"
 #include "HidLayout.h"
+#include "SnapshotNotification.h"
 #include <cfgmgr32.h>
 #include <atomic>
 #include <chrono>
@@ -18,6 +19,7 @@ namespace {
 using namespace Interceptor;
 using Clock = std::chrono::steady_clock;
 using Time = Clock::time_point;
+Remapper::SnapshotNotification snapshotNotification;
 template <std::size_t N> void Text(wchar_t (&target)[N], const std::wstring &value) noexcept {
     const auto count = std::min(N - 1, value.size());
     std::copy_n(value.data(), count, target);
@@ -142,7 +144,6 @@ class Service {
     std::uint32_t nextKey_ = 1;
     std::uint64_t received_ = 0, forwarded_ = 0, changed_ = 0, timerOutputs_ = 0, faults_ = 0, measured_ = 0;
     double processingUs_ = 0;
-    Time lastPublish_ = Time::min();
     bool snapshotDirty_ = false;
     Time armedDeadline_ = Time::max();
     bool preciseTimer_ = true;
@@ -160,8 +161,7 @@ class Service {
         }
     }
     void Publish(bool force = false) {
-        const auto now = Clock::now();
-        if (!force && (!snapshotDirty_ || now - lastPublish_ < std::chrono::milliseconds(100)))
+        if (!force && !snapshotDirty_)
             return;
         std::vector<GR_Device> devices;
         devices.reserve(sources_.size());
@@ -194,8 +194,8 @@ class Service {
         Text(snapshot_.status, status_);
         Text(snapshot_.error, error_);
         deviceSnapshot_ = std::move(devices);
-        lastPublish_ = now;
         snapshotDirty_ = false;
+        snapshotNotification.Changed();
     }
     Source &GetSource(const Input_Event &input) {
         const auto family = static_cast<unsigned>(input.type);
@@ -419,10 +419,9 @@ class Service {
         }
     }
     void ArmTimer() {
-        // Publish the final state even if a release stops all script timers and
-        // the controller subsequently sends no reports. This one-shot wake is
-        // removed as soon as the detached UI snapshot has caught up.
-        auto earliest = snapshotDirty_ ? lastPublish_ + std::chrono::milliseconds(100) : Time::max();
+        // Only script deadlines need a timer. UI snapshots are published after
+        // forwarding the current batch and never delay the final quiet update.
+        auto earliest = Time::max();
         for (const auto &item : sources_)
             earliest = std::min(earliest, item.second->deadline);
         if (earliest == armedDeadline_)
@@ -626,6 +625,13 @@ class Service {
 std::mutex apiMutex;
 std::unique_ptr<Service> service;
 } // namespace
+
+void __cdecl GR_SetSnapshotWindow(HWND window, UINT message) {
+    snapshotNotification.Attach(window, message);
+}
+BOOL __cdecl GR_AcknowledgeSnapshot(HWND window, ULONG_PTR generation) {
+    return snapshotNotification.Acknowledge(window, generation) ? TRUE : FALSE;
+}
 
 std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters) {
     try {

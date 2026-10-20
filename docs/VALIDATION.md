@@ -1,4 +1,31 @@
-# Validation - 2.1.0 interface update
+# Validation
+
+## 2.1.1 controller and display update
+
+The embedded SDK is byte-identical to Gamepad & Controller SDK 1.0.4.0.
+It retains successfully opened pending HID/XInputHID/XUSB collection files
+and preserves native startup failures. The bundled installer now contains
+Microsoft-signed controller driver 1.0.2.0. Its two-hour limit is unchanged.
+
+The capture worker publishes changed snapshots after forwarding, without the
+former 100 ms limit or a display-only wake timer. The Win32 monitor uses one
+pending message for the newest state, acknowledges before reading, and ignores
+stale window generations. The former 150 ms active-monitor interval is removed.
+Idle health refresh and decorative editor animation are separate from input
+processing and do not throttle snapshot notifications or script deadlines.
+
+All six CTest suites and offline UI self-tests pass in Release and under
+AddressSanitizer. These include 30,010 production notification-helper checks,
+100,000 concurrent notifications, 10,000 bursts, 197,833 capture/codec checks,
+24 service-boundary checks, 6,046 widget checks with 100 lifetime cycles and
+202,000 script VM stress frames. Final quiet updates, stale notifications,
+shutdown, forwarding failures and exact startup causes are covered.
+No host driver was opened or installed. Physical hardware latency/FPS and
+the updated application with a physical controller were not measured here.
+The following older validation remains historical evidence, not a claim that
+its live VM checks were repeated for 2.1.1.
+
+## 2.1.0 interface update
 
 This release redesigns the native C++ interface. The application remains one
 optimized **AMD64 EXE with no CLR header**, a static C++ runtime, ASLR, DEP and
