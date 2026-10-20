@@ -150,10 +150,11 @@ int main() {
         deviceSnapshot.size = sizeof(deviceSnapshot);
         deviceSnapshot.key = 73;
         deviceSnapshot.family = 3;
+        deviceSnapshot.flags = GR_PHYSICAL_VALID | GR_OUTPUT_VALID;
         wcscpy_s(deviceSnapshot.name, L"Controller \u00e9");
         wcscpy_s(deviceSnapshot.token, L"capture-local-token");
         wcscpy_s(deviceSnapshot.diagnostic, L"Descriptor-driven test source");
-        deviceSnapshot.available[96] = 1;
+        deviceSnapshot.available[96] = 3;
         deviceSnapshot.values[96] = -40;
         deviceSnapshot.output_values[96] = 30;
         exposeDevice = true;
@@ -162,7 +163,9 @@ int main() {
         Check(detached.Devices.size() == 1 && detached.Devices[0].Name == "Controller \xc3\xa9" &&
                   detached.Devices[0].Token == "capture-local-token" &&
                   detached.Devices[0].Available[96] && detached.Devices[0].Values[96] == -40 &&
-                  detached.Devices[0].OutputValues[96] == 30,
+                  detached.Devices[0].OutputValues[96] == 30 &&
+                  detached.Devices[0].PhysicalValid && detached.Devices[0].OutputValid &&
+                  detached.Devices[0].OutputAvailable[96],
               "Detached snapshots preserve UTF-8 identity, availability and physical/output arrays.");
         detached.Devices[0].Values[96] = 99;
         detached.Devices[0].OutputValues[96] = 99;
@@ -171,6 +174,17 @@ int main() {
         Check(fresh.Devices[0].Values[96] == -40 && fresh.Devices[0].OutputValues[96] == 30 &&
                   fresh.Devices[0].Name == "Controller \xc3\xa9",
               "A consumer cannot mutate the native snapshot or subsequent service snapshots.");
+        deviceSnapshot.flags = GR_PHYSICAL_VALID;
+        Check(service.GetSnapshot().Devices[0].PhysicalValid &&
+                  !service.GetSnapshot().Devices[0].OutputValid,
+              "An output rejected by the driver cannot masquerade as an accepted output.");
+        deviceSnapshot.flags = GR_PHYSICAL_VALID | GR_OUTPUT_VALID;
+        deviceSnapshot.available[32] = 1;
+        deviceSnapshot.values[32] = 100;
+        const auto partial = service.GetSnapshot();
+        Check(partial.Devices[0].OutputAvailable[96] && partial.Devices[0].Available[32] &&
+                  !partial.Devices[0].OutputAvailable[32],
+              "A rejected new HID report cannot borrow output validity from another accepted report.");
         exposeDevice = false;
         snapshot.device_count = 0;
         service.Inject(ScriptCompiler::Compile(

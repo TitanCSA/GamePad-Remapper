@@ -126,7 +126,9 @@ struct Source {
     std::wstring name, diagnostic;
     Remapper::HidSlots slots;
     std::array<int, 256> physical{}, output{};
-    std::array<std::uint8_t, 256> available{};
+    std::array<int, 256> observed{}, forwarded{};
+    bool physicalValid = false, outputValid = false;
+    std::array<std::uint8_t, 256> available{}, outputKnown{};
     std::vector<Report> reports;
     std::vector<unsigned> relative;
     std::array<bool, 256> relativeKnown{};
@@ -179,12 +181,15 @@ class Service {
             device.size = sizeof(device);
             device.key = source.key;
             device.family = source.family;
+            device.flags = (source.physicalValid ? GR_PHYSICAL_VALID : 0) |
+                           (source.outputValid ? GR_OUTPUT_VALID : 0);
             Text(device.name, source.name);
             Text(device.token, Wide(source.token));
             Text(device.diagnostic, source.diagnostic);
-            std::copy(source.physical.begin(), source.physical.end(), device.values);
-            std::copy(source.available.begin(), source.available.end(), device.available);
-            std::copy(source.output.begin(), source.output.end(), device.output_values);
+            std::copy(source.observed.begin(), source.observed.end(), device.values);
+            for (std::size_t i = 0; i < source.available.size(); ++i)
+                device.available[i] = source.available[i] | (source.outputKnown[i] ? 2 : 0);
+            std::copy(source.forwarded.begin(), source.forwarded.end(), device.output_values);
             devices.push_back(device);
         }
         std::sort(devices.begin(), devices.end(),
@@ -329,8 +334,40 @@ class Service {
             Remapper::WriteNative(state, gip, source.physical, source.output);
         }
     }
+    template <class T> static void Accepted(Source &source, const T &input) {
+        if constexpr (std::is_base_of_v<Hid_Decoded_Input, T>)
+            source.slots.ReadForwarded(input, source.physical, source.output, source.forwarded,
+                                       &source.outputKnown);
+        else {
+            constexpr bool gip = std::is_same_v<T, Controller_GIP_Input> ||
+                                 std::is_same_v<T, Controller_GIP_Raw_Input>;
+            const auto &state = [&]() -> const auto & {
+                if constexpr (std::is_same_v<T, Controller_GIP_Raw_Input>)
+                    return input.input.state;
+                else
+                    return input.state;
+            }();
+            Remapper::ReadNative(state, gip, source.forwarded, source.available);
+            source.outputKnown = source.available;
+        }
+        source.outputValid = true;
+    }
+    static void AcceptedEvent(Source &source, const Input_Event &input) {
+        if (auto hid = input.Get<Controller_Hid_Input>())
+            Accepted(source, *hid);
+        else if (auto xusb = input.Get<Controller_Xinput_Input>())
+            Accepted(source, *xusb);
+        else if (auto xih = input.Get<Controller_XinputHid_Input>())
+            Accepted(source, *xih);
+        else if (auto raw = input.Get<Controller_GIP_Raw_Input>())
+            Accepted(source, *raw);
+        else if (auto gip = input.Get<Controller_GIP_Input>())
+            Accepted(source, *gip);
+    }
     bool Execute(Source &source, unsigned flags) {
         snapshotDirty_ = true;
+        source.observed = source.physical;
+        Remapper::ClearRelative(source.forwarded, source.relative);
         source.output = source.physical;
         const int next = callback_(source.key, source.family, source.physical.data(),
                                    source.available.data(), source.output.data(), flags, user_);
@@ -369,6 +406,7 @@ class Service {
         auto &report = *position;
         report.physical = input;
         Read(source, input, report);
+        source.physicalValid = true;
         if constexpr (std::is_base_of_v<Hid_Decoded_Input, T>) {
             source.slots.PrepareSynthetic(std::get<T>(report.physical), report.relative);
             for (const auto slot : report.relative)
@@ -395,11 +433,16 @@ class Service {
             auto &source = *entry.second;
             source.deadline = Time::max();
             Remapper::ClearRelative(source.physical, source.relative);
+            Remapper::ClearRelative(source.observed, source.relative);
+            Remapper::ClearRelative(source.forwarded, source.relative);
             source.output = source.physical;
             for (auto &report : source.reports) {
                 if (!Different(report, report.lastOutput, source.physical))
                     continue;
-                std::visit([](const auto &input) { RequireSend(Send_Input(input)); }, report.physical);
+                std::visit([&](const auto &input) {
+                    RequireSend(Send_Input(input));
+                    Accepted(source, input);
+                }, report.physical);
                 ++forwarded_;
                 report.lastOutput = source.physical;
             }
@@ -424,6 +467,7 @@ class Service {
                     edited = physical;
                     Apply(source, edited);
                     RequireSend(Send_Input(edited));
+                    Accepted(source, edited);
                 },
                 report.physical);
             report.lastOutput = source.output;
@@ -528,6 +572,7 @@ class Service {
                         // A callback fault must forward this physical report first,
                         // then release the entire capture to restore passthrough.
                         RequireSend(Send_Input(input));
+                        AcceptedEvent(source, input);
                         ++forwarded_;
                         if (good)
                             SendScheduled(source);
@@ -570,6 +615,8 @@ class Service {
         try {
             RestoreAndReset(false);
         } catch (...) {
+            for (auto &entry : sources_)
+                entry.second->outputValid = false;
         }
         try {
             Destroy_Context();

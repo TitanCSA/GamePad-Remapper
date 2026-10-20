@@ -270,10 +270,14 @@ ServiceSnapshot RemapperService::GetSnapshot() {
         device.Name = Utf8(source.name);
         device.Token = Utf8(source.token);
         device.Diagnostic = Utf8(source.diagnostic);
+        device.PhysicalValid = (source.flags & GR_PHYSICAL_VALID) != 0;
+        device.OutputValid = (source.flags & GR_OUTPUT_VALID) != 0;
         std::copy_n(source.values, 256, device.Values.begin());
         std::copy_n(source.output_values, 256, device.OutputValues.begin());
-        for (std::size_t slot = 0; slot < 256; ++slot)
-            device.Available[slot] = source.available[slot] != 0;
+        for (std::size_t slot = 0; slot < 256; ++slot) {
+            device.Available[slot] = (source.available[slot] & 1) != 0;
+            device.OutputAvailable[slot] = (source.available[slot] & 2) != 0;
+        }
         result.Devices.emplace_back(std::move(device));
     }
     {

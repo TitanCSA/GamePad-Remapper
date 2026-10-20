@@ -30,9 +30,12 @@ struct GR_Device {
     std::uint32_t size, key, family, flags;
     wchar_t name[128], token[192], diagnostic[384];
     int values[256];
-    std::uint8_t available[256];
+    std::uint8_t available[256]; // bit 0: observed control; bit 1: accepted output known
     int output_values[256];
 };
+// Values are measured physical reports and successfully accepted output reports,
+// never a speculative script result. No report yet means unknown, not zero.
+inline constexpr std::uint32_t GR_PHYSICAL_VALID = 1, GR_OUTPUT_VALID = 2;
 GR_API std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters);
 GR_API std::uint32_t __cdecl GR_Start(GR_Callback callback, void *user);
 GR_API void __cdecl GR_Stop();

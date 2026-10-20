@@ -24,6 +24,9 @@ Json SnapshotJson(const ServiceSnapshot &value) {
                            {"Diagnostic", device.Diagnostic},
                            {"Values", device.Values},
                            {"OutputValues", device.OutputValues},
+                           {"PhysicalValid", device.PhysicalValid},
+                           {"OutputValid", device.OutputValid},
+                           {"OutputAvailable", device.OutputAvailable},
                            {"Available", device.Available}});
     return {{"Running", value.Running},
             {"Status", value.Status},
@@ -133,6 +136,9 @@ int RunLiveTest(const std::wstring &reportPath, int seconds) {
                         : device.Values[32] > 0 && device.Values[33] > 0;
                 anyActive |= triggered;
                 const auto ox = device.OutputValues[x], oy = device.OutputValues[y];
+                Require(device.PhysicalValid && device.OutputValid &&
+                            device.OutputAvailable[x] && device.OutputAvailable[y],
+                        "Pattern snapshots must contain observed input and accepted output, not pending values.");
                 if (triggered) {
                     Require(std::abs(ox - device.Values[x]) <= 25 && std::abs(oy - device.Values[y]) <= 25,
                             "An additive pattern drifted away from its physical center.");

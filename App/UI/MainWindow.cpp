@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "NativeWidgets.h"
 #include "ScriptPanel.h"
+#include "DriverSetup.h"
 #include "../Core/VisualDocument.h"
 #include "../Capture/Service.h"
 #include "../Capture/Bridge.h"
@@ -525,8 +526,10 @@ class MainWindow final {
         SendMessageW(controls_[Code], EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_SCROLL);
         SetWindowSubclass(controls_[Code], CodeProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
         controls_[Monitor] =
-            Control(Monitor, MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
-        Rich(controls_[Monitor], false);
+            Control(Monitor, MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL |
+                    WS_VSCROLL | WS_HSCROLL | WS_TABSTOP);
+        Rich(controls_[Monitor], true);
+        SendMessageW(controls_[Monitor], EM_EXLIMITTEXT, 0, 4 * 1024 * 1024);
         form_ = CreateWindowExW(0, L"GprVisualForm", L"", WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0,
                                 1, 1, window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
         SetWindowLongPtrW(form_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -578,7 +581,7 @@ class MainWindow final {
         const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
         const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
         libraryWidth_ = width < 1100 ? 184 : 224;
-        inspectorWidth_ = width < 1100 ? 208 : 264;
+        inspectorWidth_ = width < 1100 ? 208 : width < 1300 ? 264 : 320;
         const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
         const int ew = er - ex, bottom = height - 32, contentBottom = bottom - 108;
         editorRect_ = {S(ex), S(96), S(er), S(bottom)};
@@ -2005,25 +2008,34 @@ class MainWindow final {
             InvalidateRect(window_, &editorRect_, FALSE);
     }
     std::string Values(const ServiceDevice &device) const {
-        std::string output;
-        int shown = 0;
-        for (int phase = 0; phase < 3; ++phase)
-            for (std::size_t i = 0; i < 256; ++i) {
-                if (!device.Available[i])
-                    continue;
-                const bool changed = device.OutputValues[i] != device.Values[i];
-                const bool active = i >= 192 && i < 208 ? device.Values[i] >= 0 : device.Values[i] != 0;
-                if (phase == 0 ? !changed : phase == 1 ? changed || !active : changed || active)
-                    continue;
-                if (shown++ >= 12 || output.size() > 240)
-                    return output + " …";
-                if (!output.empty())
-                    output += "  ";
-                output += Controls::Names()[i] + " " + std::to_string(device.Values[i]);
-                if (changed)
-                    output += " → " + std::to_string(device.OutputValues[i]);
-            }
-        return output.empty() ? "Waiting for a physical report" : output;
+        if (!device.PhysicalValid)
+            return "Waiting for a physical report\nNo values measured yet.";
+        std::ostringstream output;
+        output << "          INPUT OUTPUT\n";
+        const auto value = [](std::size_t slot, int number, bool valid) {
+            if (!valid)
+                return std::string("--");
+            if ((slot >= 6 && slot < 22) || (slot >= 32 && slot < 96))
+                return std::string(number ? "ON" : "OFF");
+            if (slot >= 192 && slot < 208)
+                return number < 0 ? std::string("N") : std::to_string(number);
+            if (slot >= 208)
+                return std::to_string(number);
+            return std::to_string(number) + "%";
+        };
+        for (std::size_t i = 0; i < 256; ++i) {
+            if (!device.Available[i])
+                continue;
+            output << std::left << std::setw(10) << Controls::Names()[i]
+                   << std::right << std::setw(5) << value(i, device.Values[i], true) << " "
+                   << std::setw(5) << value(i, device.OutputValues[i],
+                                            device.OutputValid && device.OutputAvailable[i])
+                   << (device.OutputValid && device.OutputAvailable[i] &&
+                       device.OutputValues[i] != device.Values[i] ? " *" : "")
+                   << "\n";
+        }
+        output << "\n* Differs from physical\nINPUT: physical\nOUTPUT: accepted by driver";
+        return output.str();
     }
     void UpdateMonitor() {
         std::ostringstream diagnostic;
@@ -2037,7 +2049,7 @@ class MainWindow final {
                    << std::fixed << std::setprecision(2) << snapshot_.ProcessingMicroseconds
                    << " us software processing\n\n";
         std::ostringstream visible;
-        if (demo_)
+        if (demo_ && snapshot_.Devices.empty())
             visible
                 << "Preview gamepad\nOffline example\n\nLX  0    LY  0\nRX  0    RY  0\n\nLive controls "
                    "appear here\nafter you apply a script.";
@@ -2046,6 +2058,10 @@ class MainWindow final {
                 << (snapshot_.Running
                         ? "Waiting for a controller...\n\nCompatible controllers appear automatically."
                         : "No active session\n\nApply your script to connect a controller.");
+        if (demo_ && !snapshot_.Devices.empty())
+            visible << "SIMULATED PREVIEW\nNo controller access\n\n";
+        if (!snapshot_.Running && !snapshot_.Devices.empty())
+            visible << "Last session states\nCapture is stopped\n\n";
         for (const auto &device : snapshot_.Devices) {
             visible << device.Name << "\n" << Values(device) << "\n\n";
             diagnostic << device.Name << "\n"
@@ -2077,7 +2093,7 @@ class MainWindow final {
             SendMessageW(controls_[Monitor], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selection));
             SendMessageW(controls_[Monitor], EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
             SetWindowTextW(controls_[Monitor], text.c_str());
-            Rich(controls_[Monitor], false);
+            Rich(controls_[Monitor], true);
             SendMessageW(controls_[Monitor], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&selection));
             SendMessageW(controls_[Monitor], EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
         }
@@ -2252,13 +2268,7 @@ class MainWindow final {
             ShellExecuteW(window_, L"open", libraryDirectory_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             break;
         case Driver: {
-            const auto installer = ExecutableDirectory() / L"InterceptorSetup.exe";
-            ShellExecuteW(
-                window_, L"open",
-                std::filesystem::exists(installer)
-                    ? installer.c_str()
-                    : L"https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/latest",
-                nullptr, nullptr, SW_SHOWNORMAL);
+            ui::OpenDriverSetup(window_, ExecutableDirectory());
             break;
         }
         case Recover:
@@ -2305,7 +2315,7 @@ class MainWindow final {
                 SendMessageW(item.second, LB_SETITEMHEIGHT, 0, S(60));
         }
         Rich(controls_[Code], true);
-        Rich(controls_[Monitor], false);
+        Rich(controls_[Monitor], true);
         for (const auto &item : fields_) {
             SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
             ui::SetDpi(item.second, dpi_);
@@ -2681,6 +2691,24 @@ class MainWindow final {
         Layout();
         UpdateMonitor();
     }
+    void MonitorPreview() {
+        ServiceDevice device;
+        device.Name = "Preview GIP controller";
+        device.Family = 6;
+        device.PhysicalValid = device.OutputValid = true;
+        device.Values[0] = -20;
+        device.Values[1] = 10;
+        device.OutputValues = device.Values;
+        device.OutputValues[0] = 15;
+        device.OutputValues[1] = -25;
+        for (std::size_t i = 0; i < 6; ++i)
+            device.Available[i] = device.OutputAvailable[i] = true;
+        device.Available[10] = device.OutputAvailable[10] = true;
+        device.Values[10] = device.OutputValues[10] = 100;
+        snapshot_.Devices = {device};
+        snapshot_.Running = true;
+        UpdateMonitor();
+    }
 };
 
 void PumpUntil(const std::function<bool()> &complete, DWORD timeout = 10000) {
@@ -2700,9 +2728,25 @@ void PumpUntil(const std::function<bool()> &complete, DWORD timeout = 10000) {
 }
 void MainWindow::Test(std::function<void(bool, const std::string &)> require,
                       const std::filesystem::path &directory) {
+    // PowerShell Direct runs on a noninteractive window station. IsWindowVisible
+    // includes its hidden desktop ancestor, even when every application window
+    // is correctly shown. Check the entire application hierarchy explicitly.
+    const auto workspaceVisible = [this](HWND control) {
+        for (unsigned depth = 0; control && depth < 32; ++depth) {
+            if (!IsWindow(control) || !(GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE))
+                return false;
+            if (control == window_)
+                return true;
+            control = GetAncestor(control, GA_PARENT);
+        }
+        return false;
+    };
+    require(workspaceVisible(window_), "The offline test explicitly shows its application window");
     require(demo_ && !service_, "Offline UI never constructs a capture service or accesses the driver");
     require(IsWindow(controls_[Code]) && IsWindow(controls_[Library]),
             "Native Windows code editor and library controls exist");
+    require(SendMessageW(controls_[Monitor], EM_GETLIMITTEXT, 0, 0) >= 4 * 1024 * 1024,
+            "The live monitor has room for every supported controller and all of its controls");
     const std::string initial = "// Exact source must survive mode changes.\nmain {\n}\n";
     SetSource(initial, {}, false);
     EnterVisual();
@@ -2928,11 +2972,24 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(SaveFile(false) && !std::filesystem::exists(recovery),
             "Saving a recovered script retires its consumed draft");
     ServiceDevice device;
+    device.PhysicalValid = device.OutputValid = true;
+    device.OutputAvailable.fill(true);
     device.Available[32] = device.Available[159] = true;
     device.Values[159] = -40;
     device.OutputValues[159] = 30;
-    require(Values(device).find("AXIS_64 -40 → 30") != std::string::npos,
-            "The live monitor prioritizes changed dynamic HID controls");
+    require(Values(device).find("AXIS_64    -40%   30% *") != std::string::npos,
+            "The monitor separates physical and accepted output for dynamic HID controls");
+    device.Available.fill(true);
+    require(Values(device).find("VALUE_48") != std::string::npos &&
+                Values(device).find("BUTTON_64") != std::string::npos,
+            "The monitor includes every available control instead of truncating after twelve");
+    device.PhysicalValid = false;
+    require(Values(device).find("No values measured yet") != std::string::npos,
+            "An idle source is unknown until its first physical report, not a fabricated zero state");
+    device.PhysicalValid = true;
+    device.OutputValid = false;
+    require(Values(device).find("--") != std::string::npos,
+            "An unaccepted output is not displayed as a successfully sent script result");
     discardPrompt_ = nullptr;
     Preview(true);
     const auto beforePopup = source_;
@@ -2986,18 +3043,18 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
         RECT client{};
         GetClientRect(window_, &client);
         for (const auto &control : controls_) {
-            if (!IsWindowVisible(control.second))
+            if (!workspaceVisible(control.second))
                 continue;
             const auto area = bounds(control.second);
             bounded = bounded && area.left >= 0 && area.top >= 0 && area.right <= client.right &&
                       area.bottom <= client.bottom;
         }
         for (auto firstControl = controls_.begin(); firstControl != controls_.end(); ++firstControl) {
-            if (!IsWindowVisible(firstControl->second))
+            if (!workspaceVisible(firstControl->second))
                 continue;
             for (auto secondControl = std::next(firstControl); secondControl != controls_.end();
                  ++secondControl) {
-                if (!IsWindowVisible(secondControl->second))
+                if (!workspaceVisible(secondControl->second))
                     continue;
                 RECT intersection{};
                 const auto first = bounds(firstControl->second), second = bounds(secondControl->second);
@@ -3042,10 +3099,32 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     SetSource(custom, settingsPath, false);
     PumpUntil([&] { return settingsProgram_ && accepted_ == version_; });
     Command(UseTab, BN_CLICKED);
-    require(usage_ && IsWindowVisible(parameterPanel_->Handle()) && !IsWindowVisible(controls_[Code]) &&
-                !IsWindowVisible(form_) && !IsWindowVisible(controls_[Save]) &&
-                !IsWindowVisible(controls_[Live]),
-            "Use script shows custom settings and session actions without authoring controls");
+    const bool usageVisible = usage_ && workspaceVisible(parameterPanel_->Handle()) &&
+                              !workspaceVisible(controls_[Code]) && !workspaceVisible(form_) &&
+                              !workspaceVisible(controls_[Save]) && !workspaceVisible(controls_[Live]);
+    std::string usageFailure;
+    if (!usageVisible) {
+        std::ostringstream detail;
+        const auto visible = [](HWND handle) { return IsWindowVisible(handle) != FALSE; };
+        const auto styled = [](HWND handle) {
+            return (GetWindowLongPtrW(handle, GWL_STYLE) & WS_VISIBLE) != 0;
+        };
+        detail << ": usage=" << usage_ << " visual=" << visual_
+               << " root=" << visible(window_) << "/" << styled(window_)
+               << " panel=" << visible(parameterPanel_->Handle()) << "/"
+               << styled(parameterPanel_->Handle()) << " code=" << visible(controls_[Code])
+               << "/" << styled(controls_[Code]) << " form=" << visible(form_) << "/"
+               << styled(form_) << " save=" << visible(controls_[Save]) << "/"
+               << styled(controls_[Save]) << " live=" << visible(controls_[Live]) << "/"
+               << styled(controls_[Live]) << " dirty=" << formDirty_
+               << " invalid=" << invalidVisual_ << " building=" << building_
+               << " document=" << static_cast<bool>(document_) << " row=" << row_
+               << " sourceMatches=" << (source_ == custom) << " error=" << error_;
+        usageFailure = detail.str();
+    }
+    require(usageVisible,
+            "Use script shows custom settings and session actions without authoring controls" +
+                usageFailure);
     auto panel = parameterPanel_->Handle();
     auto slider = GetDlgItem(panel, ScriptPanel::FirstInput);
     SendMessageW(slider, TBM_SETPOS, TRUE, 63);
@@ -3095,8 +3174,8 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     configured->Execute(configuredFrame, 0, 0);
     require(configuredFrame.Values[0] == 0, "The usage panel's toggle value reaches the script VM");
     Command(EditTab, BN_CLICKED);
-    require(!usage_ && (IsWindowVisible(controls_[Code]) || IsWindowVisible(form_)) &&
-                !IsWindowVisible(parameterPanel_->Handle()),
+    require(!usage_ && (workspaceVisible(controls_[Code]) || workspaceVisible(form_)) &&
+                !workspaceVisible(parameterPanel_->Handle()),
             "Edit script exposes authoring while keeping the same file and parameter values");
     EnterVisual();
     Command(UseTab, BN_CLICKED);
@@ -3323,6 +3402,10 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
         std::filesystem::create_directories(directory);
         MainWindow window(GetModuleHandleW(nullptr), true, directory / L"Scripts");
         ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
+        // STARTUPINFO can hide the first ShowWindow call in headless VM
+        // launches. These visibility/layout tests require an actual window.
+        SetWindowPos(window.Handle(), nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         UpdateWindow(window.Handle());
         if (!report.empty()) {
             window.Test(
@@ -3337,7 +3420,9 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
             const std::filesystem::path destination(renderDirectory);
             std::filesystem::create_directories(destination);
             window.UsagePreview();
+            window.MonitorPreview();
             Screenshot(window.Handle(), destination / L"script-settings.png");
+            Screenshot(window.Handle(), destination / L"controller-states.png");
             window.Preview(false);
             window.CodePreview();
             Screenshot(window.Handle(), destination / L"code-editor.png");

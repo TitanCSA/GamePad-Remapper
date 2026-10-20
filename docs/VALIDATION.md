@@ -1,5 +1,40 @@
 # Validation
 
+## 2.2.2 installer selection and physical/output states
+
+Eight offline CTest suites pass in optimized Release and AddressSanitizer.
+Installer selection checks real VERSIONINFO identities, including the classic
+and controller installers, missing/corrupt files, legacy filenames and unique
+filename priority. Tests never launch either installer on the host.
+
+The monitor no longer truncates devices to twelve controls or combines input
+and output on a single line. Output is committed after successful `Send_Input`,
+with independent known-state bits for each control in a multi-report HID device.
+Unknown input/output is not reported as a measured zero. Generic HID output is
+projected through descriptor ranges and logical resolution; native XUSB/GIP
+output is reread after wire-range saturation. Relative deltas are not held or
+replayed during later report or timer evaluations. Stopped sessions are marked
+as historical. Driver acceptance does not independently verify consumption by
+a game, browser or Windows control panel.
+
+Conversion tests cover low-resolution HID axes, hats, buttons, relative
+multi-report ordering, unknown output for an unaccepted new report, and native
+saturation. Existing script, parameter, service and lifetime stress remains
+enabled. The shipped SDK is still 1.0.4.0 and the bundled Microsoft-signed kernel
+is still 1.0.2.0. Separate GPC kernel 1.0.3.0 compatibility corrections require
+a new Microsoft signature before distribution; no unsigned candidate is
+included in the application download. No host driver was opened or installed.
+
+The exact 2.2.2 release EXE also passes 81 offline native UI checks in Windows 11.
+Its live capture test with virtual HID/GIP fixtures passes remapping, timed
+output, additive motion through quiet input periods, fault recovery, Stop and
+reinjection; it observes 115 distinct HID and 110 distinct GIP motion points.
+The separate XUSB viewer test passes six idle-start cycles and 3,721 assertions,
+including comparison against an independent XInput consumer. These runs use an
+isolated development-signed copy of the new 1.0.3.0 kernel body, which is not
+distributed. Physical browser and `joy.cpl` behavior remains unverified until
+the new Microsoft-signed driver is tested on the affected hardware.
+
 ## 2.2.1 script-defined interfaces
 
 Separate Use/Edit workspaces and the `ui` compiler/runtime additions are tested

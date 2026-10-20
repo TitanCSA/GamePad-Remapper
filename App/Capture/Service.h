@@ -11,7 +11,8 @@ struct ServiceDevice {
     std::uint32_t Key = 0, Family = 0;
     std::string Name, Token, Diagnostic;
     std::array<int, 256> Values{}, OutputValues{};
-    std::array<bool, 256> Available{};
+    std::array<bool, 256> Available{}, OutputAvailable{};
+    bool PhysicalValid = false, OutputValid = false;
 };
 struct ServiceSnapshot {
     std::string Status = "Ready", Error;

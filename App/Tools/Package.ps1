@@ -2,7 +2,7 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.2.1'
+$version='2.2.2'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'
@@ -15,6 +15,7 @@ if(!$DriverInstaller){
     Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/download/v1.0.4.0-demo/InterceptorSetup.exe' -OutFile $DriverInstaller
 }
 if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned complete 1.0.4.0 release (Microsoft-signed kernel 1.0.2.0).'}
+if([Diagnostics.FileVersionInfo]::GetVersionInfo($DriverInstaller).ProductName -cne 'InterceptorGamepadController'){throw 'The installer must identify the Interceptor Gamepad Controller product, not classic Interceptor.'}
 $application=Join-Path $out 'GamePadRemapper.exe'
 if(!(Test-Path -LiteralPath $application)){throw 'Build GamePadRemapper.exe first.'}
 # A native Windows EXE must have an empty CLR runtime directory (PE32+).
@@ -31,7 +32,7 @@ $scriptDestination=Join-Path $folder 'Scripts'
 New-Item -ItemType Directory -Path $scriptDestination|Out-Null
 Get-ChildItem -LiteralPath (Join-Path $root 'Scripts') -Filter '*.igc' -File|Copy-Item -Destination $scriptDestination
 Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $folder -Recurse
-Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $folder 'InterceptorSetup.exe')
+Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $folder 'InterceptorGamepadControllerSetup.exe')
 Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $dist 'InterceptorSetup.exe') -Force
 $zipPath=Join-Path $dist ('GamePad-Remapper-'+$version+'-win-x64.zip')
 if(Test-Path -LiteralPath $zipPath){Remove-Item -LiteralPath $zipPath -Force}

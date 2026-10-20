@@ -220,12 +220,98 @@ void RelativeReports() {
               "Explicit relative output uses raw units without hat-direction conversion");
     }
 }
+void ForwardedStates() {
+    using namespace Interceptor;
+    Remapper::HidSlots slots;
+    Hid_Decoded_Input input;
+    Hid_Value axis;
+    axis.kind = Hid_Value_Kind::Axis;
+    axis.usage_page = 1;
+    axis.usage = 0x30;
+    axis.minimum = -2;
+    axis.maximum = 2;
+    axis.bit_size = 3;
+    axis.normalized_valid = true;
+    input.state.axes.push_back(axis);
+    Hid_Value hat;
+    hat.kind = Hid_Value_Kind::Hat;
+    hat.usage_page = 1;
+    hat.usage = 0x39;
+    hat.minimum = 0;
+    hat.maximum = 3;
+    hat.bit_size = 3;
+    input.state.hats.push_back(hat);
+    Hid_Button button;
+    button.usage_page = 9;
+    button.usage = 1;
+    input.state.buttons.push_back(button);
+    std::array<int, 256> physical{}, requested{}, forwarded{};
+    std::array<std::uint8_t, 256> available{};
+    slots.Read(input, physical, available);
+    for (int percent = -100; percent <= 100; ++percent) {
+        auto edited = input;
+        requested = physical;
+        requested[96] = percent;
+        requested[192] = 7;
+        requested[32] = 1;
+        slots.Write(edited, physical, requested);
+        slots.ReadForwarded(edited, physical, requested, forwarded);
+        const auto raw = std::llround(std::clamp(percent, -100, 100) * 2.0 / 100);
+        Check(forwarded[96] == raw * 50,
+              "Low-resolution HID monitor shows representable output rather than requested percentage");
+        Check(forwarded[192] == 6 && forwarded[32] == 100,
+              "Forwarded HID hat and button display reflect the actual encoded direction and press");
+    }
+    // Preserve actual relative movements for the last physical report. The
+    // synthetic template is neutralized separately, without erasing this view.
+    input.state.axes[0].relative = true;
+    input.state.axes[0].normalized_valid = false;
+    input.state.axes[0].minimum = -1000;
+    input.state.axes[0].maximum = 1000;
+    input.state.axes[0].value = 17;
+    slots.Read(input, physical, available);
+    requested = physical;
+    std::array<std::uint8_t, 256> known{};
+    slots.ReadForwarded(input, physical, requested, forwarded, &known);
+    Check(forwarded[208] == 17, "Physical relative reports retain their real delta in the monitor");
+    std::vector<unsigned> relative;
+    slots.PrepareSynthetic(input, relative);
+    Remapper::ClearRelative(physical, relative);
+    Remapper::ClearRelative(forwarded, relative);
+    Hid_Decoded_Input other;
+    button.report_id = 2;
+    button.pressed = true;
+    other.state.buttons.push_back(button);
+    slots.Read(other, physical, available);
+    requested = physical;
+    slots.ReadForwarded(other, physical, requested, forwarded, &known);
+    Check(forwarded[208] == 0 && physical[208] == 0 && known[33] && forwarded[33] == 100,
+          "An unrelated accepted HID report does not replay or invent a previous relative movement");
+    other.state.buttons[0].report_id = 3;
+    slots.Read(other, physical, available);
+    // The driver rejects this report: do not commit ReadForwarded. Other
+    // successfully delivered reports must not give the new control validity.
+    Check(available[34] && !known[34] && known[33],
+          "A newly observed but unaccepted report stays unknown independently of accepted reports");
+    for (bool gip : {false, true}) {
+        IC_NATIVE_GAMEPAD_STATE native{};
+        Remapper::ReadNative(native, gip, physical, available);
+        requested = physical;
+        requested[0] = 999;
+        requested[4] = -999;
+        Remapper::WriteNative(native, gip, physical, requested);
+        Remapper::ReadNative(native, gip, forwarded, available);
+        Check(forwarded[0] == 100 && forwarded[4] == 0,
+              "Native output monitor reflects saturation on both XUSB and GIP, not an invalid request");
+    }
+}
 } // namespace
 int main() {
     try {
         NativeExactness();
         HidIdentities();
         RelativeReports();
+        ForwardedStates();
         std::printf("Native pure checks passed: %u; no driver access\n", checks);
         return 0;
     } catch (const std::exception &error) {

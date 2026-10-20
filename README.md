@@ -8,12 +8,21 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.2.1:** two workspaces, **Use script** and **Edit script**. Script authors
+**2.2.2:** the driver launcher checks the correct Gamepad & Controller edition;
+the monitor compares every physical control with its accepted output, including
+HID report limits and resolution. [Controller state display](docs/images/controller-states.png).
+
+Two workspaces, **Use script** and **Edit script**. Script authors
 declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block;
 players adjust them without touching the code. Settings are remembered per file
 and update a running script without recompilation or resetting its macros.
 Includes SDK 1.0.4.0 and the unchanged controller installer with Microsoft-signed
 kernel 1.0.2.0. [Create a script interface](docs/SCRIPT-INTERFACE.md).
+
+Compatibility corrections for controller kernel **1.0.3.0** are awaiting a new
+Microsoft signature. The current download still bundles the already-signed
+**1.0.2.0** driver; the application update alone does not install those pending
+kernel corrections. The classic Interceptor driver is unchanged.
 
 | Use a script | Edit its code |
 | --- | --- |
@@ -57,16 +66,24 @@ settings and live session easy to distinguish.
 - **Fewer clicks:** automatic background validation, readable behavior summaries,
   connected controls first in selectors, and optional **Live apply valid edits**.
   Invalid edits keep the last working configuration.
-- **Monitor:** actual controller activity, forwarding counts, measured processing
-  time and copyable diagnostics. The UI runs separately from the input worker.
+- **Monitor:** every available control in separate **INPUT** (physical) and
+  **OUTPUT** (accepted by the driver) columns. `*` identifies a changed value;
+  `--` means no accepted output is known yet. HID output reflects descriptor
+  limits and quantization, including controllers with multiple input reports.
+  Stopped sessions are labeled as historical. Forwarding counts, measured
+  processing time and copyable diagnostics remain available. Display updates
+  are event-driven and run separately from the input worker. An accepted report
+  is not an independent measurement of what a game or browser has consumed.
 
 ## Start
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.2.1-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.2.2-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
-2. Run **`InterceptorSetup.exe`** and install **Interceptor Gamepad & Controller**.
+2. Run **`InterceptorGamepadControllerSetup.exe`** and install **Interceptor Gamepad & Controller**.
+   **Driver setup** checks the installer's edition before launching it; a classic
+   Interceptor installer with the old shared filename will not be launched.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
 3. Open **`GamePadRemapper.exe`**. Select an example or create a script. Editing

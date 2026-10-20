@@ -1,7 +1,7 @@
-﻿{
-    "Version":  "2.2.1",
+{
+    "Version":  "2.2.2",
     "Passed":  true,
-    "CreatedUtc":  "2026-10-20T15:02:17.2843809Z",
+    "CreatedUtc":  "2026-10-20T15:34:49.5616258Z",
     "Language":  "C++17",
     "Architecture":  "AMD64",
     "ApplicationCLR":  false,
@@ -9,6 +9,8 @@
     "PhysicalControllersTested":  false,
     "DriverKernelVersion":  "1.0.2.0",
     "SdkVersion":  "1.0.4.0",
+    "KernelCandidate":  "1.0.3.0",
+    "KernelSigningPending":  true,
     "ContentFolders":  [
                            "App",
                            "Scripts",
@@ -17,13 +19,14 @@
                        ],
     "Configurations":  [
                            {
-                               "Configuration":  "Release220",
-                               "CTestSuites":  7,
+                               "Configuration":  "Release223",
                                "Passed":  true,
+                               "CTestSuites":  8,
+                               "UiChecks":  81,
+                               "CaptureChecks":  198240,
+                               "InstallerIdentityChecks":  10,
+                               "ServiceBoundaryChecks":  10034,
                                "ParameterChecks":  10036,
-                               "ParameterHotUpdates":  10000,
-                               "ServiceBoundaryChecks":  10032,
-                               "ConcurrentParameterUpdates":  10000,
                                "Core":  {
                                             "passed":  true,
                                             "tests":  25,
@@ -31,28 +34,43 @@
                                             "stress_frames":  202000,
                                             "vm_allocations":  0,
                                             "reference_cases":  107,
-                                            "average_us":  0.861171,
+                                            "average_us":  0.788797,
                                             "scope":  "native VM software cost, not hardware latency"
                                         },
                                "Visual":  {
                                               "passed":  true,
                                               "checks":  3667
                                           },
-                               "WidgetChecks":  6046,
-                               "WidgetLifetimeCycles":  100,
-                               "UiChecks":  76,
-                               "ParameterPanelDpiRebuildCycles":  100,
-                               "DriverAccess":  false,
+                               "Widgets":  {
+                                               "passed":  true,
+                                               "driver_access":  false,
+                                               "capture_started":  false,
+                                               "checks":  6046,
+                                               "lifetime_cycles":  100,
+                                               "dpi_cases":  [
+                                                                 96,
+                                                                 144,
+                                                                 192
+                                                             ],
+                                               "gdi_before":  27,
+                                               "gdi_after":  27,
+                                               "user_before":  20,
+                                               "user_after":  19,
+                                               "elapsed_ms":  2595.8699,
+                                               "scope":  "Hidden native controls, local control messages and offscreen painting only; no host input, capture service, driver, clipboard or file dialogs."
+                                           },
+                               "HostDriverOpened":  false,
                                "CaptureStarted":  false
                            },
                            {
-                               "Configuration":  "Asan220",
-                               "CTestSuites":  7,
+                               "Configuration":  "Asan223",
                                "Passed":  true,
+                               "CTestSuites":  8,
+                               "UiChecks":  81,
+                               "CaptureChecks":  198240,
+                               "InstallerIdentityChecks":  10,
+                               "ServiceBoundaryChecks":  10034,
                                "ParameterChecks":  10036,
-                               "ParameterHotUpdates":  10000,
-                               "ServiceBoundaryChecks":  10032,
-                               "ConcurrentParameterUpdates":  10000,
                                "Core":  {
                                             "passed":  true,
                                             "tests":  25,
@@ -60,20 +78,45 @@
                                             "stress_frames":  202000,
                                             "vm_allocations":  0,
                                             "reference_cases":  107,
-                                            "average_us":  8.24185,
+                                            "average_us":  7.93169,
                                             "scope":  "native VM software cost, not hardware latency"
                                         },
                                "Visual":  {
                                               "passed":  true,
                                               "checks":  3667
                                           },
-                               "WidgetChecks":  6046,
-                               "WidgetLifetimeCycles":  100,
-                               "UiChecks":  76,
-                               "ParameterPanelDpiRebuildCycles":  100,
-                               "DriverAccess":  false,
+                               "Widgets":  {
+                                               "passed":  true,
+                                               "driver_access":  false,
+                                               "capture_started":  false,
+                                               "checks":  6046,
+                                               "lifetime_cycles":  100,
+                                               "dpi_cases":  [
+                                                                 96,
+                                                                 144,
+                                                                 192
+                                                             ],
+                                               "gdi_before":  27,
+                                               "gdi_after":  27,
+                                               "user_before":  19,
+                                               "user_after":  19,
+                                               "elapsed_ms":  4188.8527,
+                                               "scope":  "Hidden native controls, local control messages and offscreen painting only; no host input, capture service, driver, clipboard or file dialogs."
+                                           },
+                               "HostDriverOpened":  false,
                                "CaptureStarted":  false
                            }
                        ],
-    "Scope":  "Offline compiler/runtime, conversion, publication and native interface/storage/resource tests. No driver installation or capture; no physical end-to-end latency measurement."
+    "VirtualMachine":  {
+                           "Passed":  true,
+                           "UiChecks":  81,
+                           "ExactApplicationSHA256":  "BB7DCF4DF9722EE7A7ACFAB7AD99F58C0D61DDD20FD0C5F05EEF8D7C8FD661A8",
+                           "HidDistinctPatternPoints":  115,
+                           "GipDistinctPatternPoints":  110,
+                           "CandidateKernelBodyTested":  true,
+                           "CandidatePrivatelyDevelopmentSigned":  true,
+                           "CandidateIncludedInDownload":  false,
+                           "PhysicalBrowserTested":  false
+                       },
+    "Scope":  "Offline compiler, conversion, service, installer selection, UI/storage/lifetime and sanitizer tests; exact release EXE with HID/GIP virtual fixtures in isolated Windows11 VM. Pending kernel candidate not shipped. No physical gamepad/browser/joy.cpl or end-to-end latency claim."
 }

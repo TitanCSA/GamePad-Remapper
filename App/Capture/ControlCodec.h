@@ -233,6 +233,49 @@ class HidSlots {
                     value.is_null = false;
                 }
     }
+    // Read the values represented by an accepted edited report. A requested
+    // percentage can quantize on a low-resolution HID axis; show that actual
+    // representable value rather than the VM's unencoded request.
+    void ReadForwarded(const Interceptor::Hid_Decoded_Input &input,
+                       const std::array<int, 256> &physical,
+                       const std::array<int, 256> &requested,
+                       std::array<int, 256> &forwarded,
+                       std::array<std::uint8_t, 256> *known = nullptr) const noexcept {
+        for (const auto &button : input.state.buttons) {
+            const auto slot = Find(Key(button));
+            if (slot < 256) {
+                forwarded[slot] = button.pressed ? 100 : 0;
+                if (known)
+                    (*known)[slot] = 1;
+            }
+        }
+        const std::vector<Interceptor::Hid_Value> *lists[]{&input.state.axes, &input.state.triggers,
+                                                         &input.state.hats, &input.state.values};
+        for (unsigned kind = 0; kind < 4; ++kind)
+            for (const auto &value : *lists[kind]) {
+                const auto key = Key(value, kind + 1);
+                const auto slot = Find(key);
+                if (slot >= 256)
+                    continue;
+                auto actual = Read(value, key.kind);
+                if ((key.kind == 1 || key.kind == 2) && value.normalized_valid &&
+                    requested[slot] != physical[slot]) {
+                    const double low = static_cast<double>(value.minimum);
+                    const double high = static_cast<double>(value.maximum);
+                    const double logical = key.kind == 2 ? low + value.normalized * (high - low)
+                        : low < 0 && high > 0 ? value.normalized * (value.normalized < 0 ? -low : high)
+                        : low + (value.normalized + 1.0) * 0.5 * (high - low);
+                    const double raw = static_cast<double>(std::llround(logical));
+                    const double normalized = key.kind == 2 ? (raw - low) / (high - low)
+                        : low < 0 && high > 0 ? raw / (raw < 0 ? -low : high)
+                        : 2.0 * (raw - low) / (high - low) - 1.0;
+                    actual = static_cast<int>(std::llround(normalized * 100.0));
+                }
+                forwarded[slot] = actual;
+                if (known)
+                    (*known)[slot] = 1;
+            }
+    }
 };
 inline void ClearRelative(std::array<int, 256> &values, const std::vector<unsigned> &slots) noexcept {
     for (const auto slot : slots)
