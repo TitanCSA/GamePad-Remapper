@@ -8,7 +8,7 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.2.4 candidate:** continuous, side-by-side **IN / OUT** debugging, including when no script is loaded. Requires the new controller kernel **1.0.5.0**, pending Microsoft signing. The latest downloadable release remains **2.2.3**, with installer **1.0.6.1** and signed kernel **1.0.4.0**. [Monitor details](docs/LIVE-MONITOR.md).
+**2.2.4:** continuous, side-by-side **IN / OUT** debugging, including when no script is loaded. Includes the **1.0.7.0-demo** controller installer with Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. [Monitor details](docs/LIVE-MONITOR.md).
 
 Two workspaces, **Use script** and **Edit script**. Script authors declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block; players adjust them without touching the code. Settings are remembered per file and update a running script without recompilation or resetting its macros. [Create a script interface](docs/SCRIPT-INTERFACE.md).
 
@@ -56,7 +56,7 @@ settings and live session easy to distinguish.
 - **Fewer clicks:** automatic background validation, readable behavior summaries,
   connected controls first in selectors, and optional **Live apply valid edits**.
   Invalid edits keep the last working configuration.
-- **Live IN / OUT (2.2.4 candidate):** the right panel continuously shows what
+- **Live IN / OUT:** the right panel continuously shows what
   the filter receives from each controller beside the reports it completes
   to Windows. No script or capture context is required. Applying a script
   changes OUT; **Stop** restores passthrough and leaves the monitor running.
@@ -66,19 +66,21 @@ settings and live session easy to distinguish.
   debug the full path. OUT measures the driver's Windows completion boundary;
   it does not confirm that every application has consumed the report.
 
-## Start (published 2.2.3)
+## Start
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.2.3-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.2.4-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
-2. If the current **Interceptor Gamepad & Controller 1.0.4.0** driver is already installed and its associations are complete, keep it and continue to step 3. Otherwise run **`InterceptorGamepadControllerSetup.exe`** from this ZIP.
+2. Run **`InterceptorGamepadControllerSetup.exe`** from this ZIP to install or update the controller driver to **1.0.5.0**. If that kernel is already installed and its device associations are complete, continue to step 3. Older kernels cannot provide continuous IN / OUT telemetry.
    **Driver setup** checks the installer's edition before launching it; a classic
    Interceptor installer with the old shared filename will not be launched.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
-3. Open **`GamePadRemapper.exe`**. Select an example or create a script. Editing
-   and compiling work without an installed driver or administrator rights.
+3. Open **`GamePadRemapper.exe`**. Choose **Enable live IN / OUT** to observe
+   controllers without applying a script; an elevated launch starts the monitor
+   automatically. Select an example or create a script. Editing and compiling
+   work without an installed driver or administrator rights.
 4. In **Use script**, adjust the settings and choose **Apply script**
    (**Ctrl+Enter**). Use **Edit script** to change the code or visual rules.
    Approve Windows elevation when requested: the driver restricts capture to
@@ -220,7 +222,9 @@ The signed driver is a **two-hour demo per Windows boot**, starting at the first
 successful capture and shared by applications using this driver edition.
 Closing or reinstalling does not reset it. At expiry, captures are revoked and
 physical input passes through normally. Use Windows **Restart** for a new
-allowance. For the unrestricted driver, DM **`titancsa`** on Discord.
+allowance. Passive IN / OUT observation does not start or reset this timer; an
+already-active allowance continues while observing. For the unrestricted driver,
+DM **`titancsa`** on Discord.
 
 The remapper is open source under [MIT](LICENSE). Driver binary terms are
 [separate](DRIVER-BINARY-LICENSE.txt). The release includes the unmodified

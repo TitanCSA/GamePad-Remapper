@@ -14,7 +14,8 @@ records it for repeat tests.
 .\Build.ps1 -Target Test        # test existing binaries
 .\Build.ps1 -Render             # also render the native interface without capture
 .\Build.ps1 -AddressSanitizer   # separate instrumented build and tests
-.\Build.ps1 -Target Package     # test and create the portable release archive
+.\Build.ps1 -Target Package -DriverInstaller 'C:\Downloads\InterceptorGamepadControllerSetup.exe'
+                                # test and package with the pinned driver installer
 ```
 
 The executable is **`App/.build/Release/bin/GamePadRemapper.exe`**. All application
@@ -49,6 +50,12 @@ driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
+Version **2.2.4** packages the **1.0.7.0-demo** controller installer with
+Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. Supply that release's
+original installer to `-DriverInstaller`; older installers and the classic
+Interceptor edition are rejected. Release tags, installer VERSIONINFO and kernel
+versions are recorded separately in the generated `package-manifest.json`.
+
 The ten CTest suites include passive driver-monitor fixtures, the script-interface compiler/VM fixtures,
 concurrent parameter-publication checks and the actual capture worker against
 an isolated transport. The offline UI test also exercises
@@ -56,7 +63,6 @@ custom controls, sidecar/fallback storage, workspace switching and DPI/resource
 lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
 values and recovery drafts are excluded.
 
-The 2.2.4 source candidate builds and tests normally. Release packaging is
-blocked until the new 1.0.5.0 controller kernel has a Microsoft signature and
-its installer hash is pinned. Packaging it with the older 1.0.4.0 installer
-would leave the continuous monitor unavailable.
+Packaging also rejects managed or AddressSanitizer-instrumented application
+binaries. It copies the supplied driver installer unchanged; no signing tool,
+private key or kernel source is needed to build the application.

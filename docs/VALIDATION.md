@@ -1,10 +1,10 @@
 # Validation
 
-## 2.2.4 continuous monitor candidate
+## 2.2.4 continuous monitor
 
 The right panel observes independent IN and OUT telemetry, without a script or
-capture context. This candidate requires controller kernel **1.0.5.0**, pending
-Microsoft signing. SDK **1.0.4.2** reuses its descriptor parser through two pure
+capture context. This release bundles the **1.0.7.0-demo** installer with
+Microsoft-signed controller kernel **1.0.5.0**. SDK **1.0.4.2** reuses its descriptor parser through two pure
 internal adapter functions. The classic Interceptor product is unchanged.
 
 The application passes all ten offline CTest suites and 93 native UI checks in
@@ -21,24 +21,76 @@ and lifetime code. They verify no OUT at SEND acceptance or queue insertion,
 one IN per physical receive across backpressure, bounded observer loss, concurrent
 subscription/close, and normal versus terminal device lifetimes. Production and
 WDK code-analysis builds pass. These isolated checks do not measure physical
-hardware latency or establish compatibility with every device. Candidate results
+hardware latency or establish compatibility with every device. Results
 are recorded separately in [monitor-validation.json](monitor-validation.json);
 the historical release results below retain their original scope.
 
 In the isolated Windows 11 VM, the real monitor receives valid HID, XUSB and
-GIP IN/OUT reports before loading a script, with zero observed ring loss. The
-trial remains unstarted throughout those passive runs. Real service tests then
-apply a script, observe modified Windows completions and stop capture while
-monitoring continues. The final application also exercises the native UI and
-Copy diagnostics at 1024 pixels. These tests use controlled virtual devices and
-Driver Verifier, not physical controllers or a latency benchmark.
+GIP IN/OUT reports before loading a script. Two passive runs each contain 201
+snapshots: 152 coherent IN/OUT pairs per native family and 179 per family in the
+HID/GIP run. Sequence numbers and QPC timestamps advance, the trial remains
+unstarted, and unstimulated controls remain unknown.
 
-The VM uses a development-signed copy of the exact production kernel body. An
+Two further 601-snapshot service runs apply a script, observe modified Windows
+completions and stop capture while monitoring continues:
+
+| Fixture | Modified snapshots after the first actual changed OUT | Fresh passthrough pairs after Stop |
+| --- | ---: | ---: |
+| XUSB | 191 | 192 |
+| GIP, native run | 191 | 192 |
+| HID | 179 | 228 |
+| GIP, HID run | 179 | 228 |
+
+All eligible pairs match the expected state, with zero observed ring loss,
+script faults or monitor errors. Assertions require successful statuses, known
+fields, raw bytes, a later OUT sequence and an OUT QPC at least as recent as IN. Apply checks exclude
+old egress before the first actual modified completion; Stop checks require
+fresh IN and OUT after the prior script phase. Repeated snapshots are not report
+rates. The HID run follows the native run in the same boot and correctly retains
+its existing trial start time. The final application also exercises the native
+UI and Copy diagnostics at 1024 pixels. These tests use controlled virtual
+devices and Driver Verifier, not physical controllers or a latency benchmark.
+
+The VM used a development-signed copy of the exact production kernel body. An
 isolated INF version 1.0.5.1 avoids Windows caching an earlier same-version lab
-package; only that lab metadata/catalog differs. The submission remains kernel
-1.0.5.0 and requires Microsoft's signature before release packaging.
+package; only that lab metadata/catalog differs. The distributed 1.0.5.0 package
+has since been Microsoft-signed. The original results above retain their
+laboratory-signature scope; returned-package checks are described below. Live
+XInputHID, power/hotplug and foreign-capture transitions were not repeated in
+these four probe runs; isolated tests cover their implemented boundaries.
 
-## 2.2.3 current driver integration
+### Returned Microsoft-signed package
+
+The final **1.0.7.0** console installer was additionally exercised with the
+returned **1.0.5.0** package. Initial installation returned restart-required
+code 3010; reinstallation returned 0. The installed SYS and catalogue have valid
+Microsoft signatures, and `signtool /kp /c` verifies installed catalogue
+membership with exit code 0. Uninstallation returned 3010, followed by 0 after
+a normal Windows restart. The UI installer's embedded payload is byte-identical;
+its setup buttons were not clicked during this run.
+
+With that installed package, a further 601-snapshot XUSB/GIP service run records
+53 telemetry frames, zero loss, faults or errors, and an unstarted trial before
+capture. Each family has **191** matching modified snapshots and **191** fresh
+passthrough pairs after Stop. Assertions exclude nine Apply-transition snapshots
+and fifty old or incoherent post-Stop snapshots per family, using the same
+sequence, QPC, known-field and raw-byte guards as above.
+
+The exact final application also passes real GUI **Apply**, **Stop** and three
+**Copy diagnostics** operations with HID/GIP fixtures. It shows physical axes
+beside changed OUT values of `50% / -25%`, then matching IN/OUT after Stop while
+observation continues. The guest was restored to its original class-filter
+values and checkpoints and shut down normally; nothing was installed on the
+host.
+
+This separate returned-package run preserves the guest's original test-signing
+and Driver Verifier configuration. It verifies Microsoft signatures and kernel
+policy catalogue membership, but does not test a Secure Boot or test-signing-off
+boot. Browser, `joy.cpl`, WGI, standalone XInputHID consumers, power/hotplug and
+foreign-capture transitions were not newly repeated. The earlier targeted
+Driver Verifier results retain their separate laboratory scope.
+
+## 2.2.3 driver integration (historical)
 
 This version uses the exact two-file Interceptor Gamepad & Controller SDK **1.0.4.1** and bundles the unchanged **1.0.6.1** installer with Microsoft-signed kernel **1.0.4.0**. Older sections below describe historical releases and their driver versions. The classic Interceptor product is unchanged.
 

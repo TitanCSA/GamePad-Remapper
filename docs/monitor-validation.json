@@ -1,14 +1,14 @@
 {
     "Schema":  1,
     "Version":  "2.2.4",
-    "Stage":  "Candidate - Microsoft signing pending",
-    "CreatedUtc":  "2026-10-21T10:55:11.1263061Z",
+    "Stage":  "Microsoft-signed release",
+    "CreatedUtc":  "2026-10-21T11:38:12.4776824Z",
     "ApplicationSHA256":  "873DA399F7C63CE2006C36CD10F7E6C628A29286BEE4A36D00BB8A54634E9409",
     "KernelVersion":  "1.0.5.0",
-    "KernelSHA256":  "70C6A5964EBE84BC1E9AFD8A22F6CC7EC31DBA6A0D1C912AF08B9E845402CCD3",
+    "KernelSHA256":  "2D58E5AA6FCC50D10A2B8A350174DEA1183AC688D8993471EF1105C6DA4DA3FA",
     "SubmissionCABSHA256":  "691D1346A134D3CDA84097CF2F9E5212A3CF96D20B7941BD598FD58A4F56F6A7",
     "SdkVersion":  "1.0.4.2",
-    "KernelSigningPending":  true,
+    "KernelSigningPending":  false,
     "HostDriverOpened":  false,
     "PhysicalControllersTested":  false,
     "Offline":  {
@@ -56,7 +56,6 @@
                    "ObservedRingLoss":  0,
                    "ScriptApplyChangesObservedOut":  true,
                    "ScriptStopKeepsObservation":  true,
-                   "NativeUiExeMatchesCandidate":  true,
                    "NativeUiWidth":  1024,
                    "CopyDiagnosticsVerified":  true,
                    "BaselineRestored":  true,
@@ -77,8 +76,131 @@
                                                   "Xusb":  192
                                               },
                    "Mismatches":  0,
-                   "Caveat":  "Unknown initial values, stale egress and transition samples are excluded explicitly. Stimulus timing is not driver latency. Live XInputHID, power/hotplug and foreign capture transitions were not repeated; isolated tests cover their implemented boundaries."
+                   "Caveat":  "Unknown initial values, stale egress and transition samples are excluded explicitly. Stimulus timing is not driver latency. Live XInputHID, power/hotplug and foreign capture transitions were not repeated; isolated tests cover their implemented boundaries.",
+                   "SignatureScope":  "Original laboratory runs used the exact production kernel body with a development signature and INF ranking version 1.0.5.1. The returned Microsoft-signed 1.0.5.0 package has separate SignedPackageVM checks below.",
+                   "NativeUiExeMatchesRelease":  true,
+                   "OriginalRunUsedMicrosoftSignature":  false
                },
-    "PublishedReleaseChanged":  false,
-    "Passed":  true
+    "Passed":  true,
+    "SubmissionKernelSHA256":  "70C6A5964EBE84BC1E9AFD8A22F6CC7EC31DBA6A0D1C912AF08B9E845402CCD3",
+    "DriverRelease":  "1.0.7.0-demo",
+    "DriverReleaseURL":  "https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/tag/v1.0.7.0-demo",
+    "DriverInstallerSHA256":  "6B1D2EAE8C80D102F162F2395445D920A88380CC8CEC9B7F33FBFE50DB01A6A3",
+    "DriverInstallerProductVersion":  "1.0.7.0",
+    "DriverInstallerFileVersion":  "1.0.7.0",
+    "SignedPackageVM":  {
+                            "Passed":  true,
+                            "ValidationReportSHA256":  "FC326DCAF15D741BDFA2742A35F3C82EBD30D73A651CFD0D14C0B2DA7CCD1D8C",
+                            "InstallerWrapperVersion":  "1.0.7.0",
+                            "KernelInfVersion":  "1.0.5.0",
+                            "KernelSHA256":  "2D58E5AA6FCC50D10A2B8A350174DEA1183AC688D8993471EF1105C6DA4DA3FA",
+                            "ConsoleSetupSHA256":  "0462B16AC438EFAB7D3875C0E57F2971952CA0CB75A2AB13AB45D4B9464B0DD8",
+                            "UiSetupSHA256":  "6B1D2EAE8C80D102F162F2395445D920A88380CC8CEC9B7F33FBFE50DB01A6A3",
+                            "ApplicationSHA256":  "873DA399F7C63CE2006C36CD10F7E6C628A29286BEE4A36D00BB8A54634E9409",
+                            "MicrosoftSignature":  {
+                                                       "SysStatus":  "Valid",
+                                                       "CatalogStatus":  "Valid",
+                                                       "Publisher":  "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+                                                       "InstalledCatalogSHA256":  "B93D34D7B6653E22C3946873FBE1195467EEA694038B41D214D283DFA2360675",
+                                                       "GuestSignToolKernelPolicyCatalogMembershipExitCode":  0,
+                                                       "CheckedOnInitialAndReinstall":  true
+                                                   },
+                            "Setup":  {
+                                          "EntryPoint":  "Actual console /install and /uninstall; UI wrapper payload independently audited byte-identical, UI setup buttons not clicked in this run.",
+                                          "InstallExit":  3010,
+                                          "ReinstallExit":  0,
+                                          "UninstallExit":  3010,
+                                          "AfterNormalRestartUninstallExit":  0,
+                                          "OnlyNormalGuestRestarts":  true,
+                                          "NoManualClassFilterChanges":  true,
+                                          "ProductServicePackagesFiltersControlsRecoveryServiceAbsentAfterUninstall":  true
+                                      },
+                            "NativeProbe":  {
+                                                "Samples":  601,
+                                                "TelemetryFrames":  53,
+                                                "Dropped":  0,
+                                                "Faults":  0,
+                                                "ErrorSnapshots":  0,
+                                                "TrialUnstartedBeforeMonitorAtFiveSecondsAndBeforeInject":  true,
+                                                "Families":  {
+                                                                 "XUSB":  {
+                                                                              "ModifiedSnapshots":  191,
+                                                                              "DistinctModifiedOutReports":  3,
+                                                                              "ModifiedMismatches":  0,
+                                                                              "ApplyTransitionSnapshotsUnasserted":  9,
+                                                                              "AfterStopFreshPairs":  191,
+                                                                              "AfterStopStaleOrIncoherentUnasserted":  50,
+                                                                              "AfterStopMismatches":  0,
+                                                                              "DistinctAfterStopInputReports":  3,
+                                                                              "DistinctAfterStopOutputReports":  3,
+                                                                              "ObserverContinuesAfterStop":  true
+                                                                          },
+                                                                 "GIP":  {
+                                                                             "ModifiedSnapshots":  191,
+                                                                             "DistinctModifiedOutReports":  4,
+                                                                             "ModifiedMismatches":  0,
+                                                                             "ApplyTransitionSnapshotsUnasserted":  9,
+                                                                             "AfterStopFreshPairs":  191,
+                                                                             "AfterStopStaleOrIncoherentUnasserted":  50,
+                                                                             "AfterStopMismatches":  0,
+                                                                             "DistinctAfterStopInputReports":  4,
+                                                                             "DistinctAfterStopOutputReports":  4,
+                                                                             "ObserverContinuesAfterStop":  true
+                                                                         }
+                                                             }
+                                            },
+                            "ActualGuiHidGip":  {
+                                                    "Passed":  true,
+                                                    "ApplicationHashPinned":  true,
+                                                    "EntryPoint":  "Actual GUI --open owned IGC without --inject, then actual Apply and Stop buttons; three actual Copy diagnostics operations.",
+                                                    "DesktopPixels":  [
+                                                                          1024,
+                                                                          768
+                                                                      ],
+                                                    "InOutAxesVerified":  true,
+                                                    "ModifiedOutDiffersFromPhysical":  true,
+                                                    "PassthroughInOutEqualAfterStop":  true,
+                                                    "Stages":  {
+                                                                   "Passive":  {
+                                                                                   "ObserverActive":  true,
+                                                                                   "ScriptActive":  false,
+                                                                                   "Frames":  109,
+                                                                                   "Dropped":  0,
+                                                                                   "Changed":  0,
+                                                                                   "FaultsZero":  true
+                                                                               },
+                                                                   "Applied":  {
+                                                                                   "ObserverActive":  true,
+                                                                                   "ScriptActive":  true,
+                                                                                   "Frames":  308,
+                                                                                   "Dropped":  0,
+                                                                                   "Changed":  52,
+                                                                                   "FaultsZero":  true
+                                                                               },
+                                                                   "Stopped":  {
+                                                                                   "ObserverActive":  true,
+                                                                                   "ScriptActive":  false,
+                                                                                   "Frames":  474,
+                                                                                   "Dropped":  0,
+                                                                                   "Changed":  64,
+                                                                                   "FaultsZero":  true
+                                                                               }
+                                                               }
+                                                },
+                            "RestoredBaseline":  {
+                                                     "Passed":  true,
+                                                     "CriticalChecks":  19,
+                                                     "RawClassKeys":  126,
+                                                     "RawClassFiltersByteExact":  true,
+                                                     "FinalVmState":  "Off",
+                                                     "EightOriginalCheckpointsExact":  true
+                                                 },
+                            "Limits":  [
+                                           "Guest test signing and Driver Verifier settings remain at their original baseline. Microsoft signatures and installed kernel-policy catalogue membership are verified; this is not a Secure Boot or test-signing-off boot-policy test.",
+                                           "Controlled Windows 11 virtual HID, XUSB and GIP fixtures only. No physical controller certification or hardware latency/FPS measurement.",
+                                           "OUT is the actual Windows-facing driver completion. Browser, joy.cpl, WGI, standalone XInputHID, foreign-capture, power and hotplug consumers were not newly repeated.",
+                                           "Each native family excludes nine Apply-transition and fifty stale/incoherent post-Stop snapshots. Unknown values remain unknown. Earlier laboratory and targeted Verifier results remain separate."
+                                       ],
+                            "HostDriverOpened":  false
+                        }
 }

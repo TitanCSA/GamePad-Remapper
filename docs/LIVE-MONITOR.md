@@ -1,14 +1,16 @@
 # Live IN / OUT debugging
 
-Available in the **2.2.4 candidate**, with Interceptor Gamepad & Controller
-kernel **1.0.5.0**. Microsoft signing is pending; the older public 1.0.4.0
-kernel cannot supply this telemetry. The classic Interceptor driver is unchanged.
+Available in **2.2.4**, bundled with the **1.0.7.0-demo** Interceptor Gamepad &
+Controller installer and Microsoft-signed kernel **1.0.5.0**. Older kernels
+cannot supply this telemetry. The classic Interceptor driver is unchanged.
 
 Open the application elevated, or choose **Enable live IN / OUT** in the right
 panel. Nothing needs to be loaded or applied. The monitor starts independently
 of script execution and remains active after **Stop**, a script error or a
 failed capture. Editing remains available without elevation or an installed
 driver. Enabling observation does not apply a script or start the capture trial.
+If capture has already started the two-hour trial during this boot, observation
+does not pause or reset it. The monitor remains available after capture expiry.
 
 | Column | Measurement |
 | --- | --- |
