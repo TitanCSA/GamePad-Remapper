@@ -1,0 +1,134 @@
+{
+    "Schema":  1,
+    "Passed":  true,
+    "Version":  "2.3.2",
+    "CreatedUtc":  "2026-10-21T13:25:37.3925839Z",
+    "ComparedWithCommit":  "e1b243b2801a317e82e2ddd0d04947b82981219b",
+    "Scope":  "Native script interpreter truth tables, isolated transport tests, offline UI and software stress. No physical controller, host input, driver or VM was opened. Not a physical latency measurement.",
+    "HostDriverOpened":  false,
+    "CaptureStarted":  false,
+    "VmAccessed":  false,
+    "PhysicalControllerTested":  false,
+    "ProductionExecutableSHA256":  "1369263de9c1da1f95b8c5df051464e30af8219fc3b23e19b26aa400fa2bf80c",
+    "AsanToolset":  "14.44.35207",
+    "Builds":  [
+                   {
+                       "Configuration":  "Release232",
+                       "Passed":  true,
+                       "CtestSuites":  13,
+                       "NativeUiChecks":  99,
+                       "CoreGroups":  26,
+                       "CoreChecks":  79401,
+                       "StressFrames":  202000,
+                       "HotPathAllocations":  0,
+                       "ReferenceCases":  107,
+                       "NewRemapGroupPassed":  true,
+                       "CoreReportSHA256":  "e5dd589344af0d5fb97ce2299cd0b7a63302fd9e196f3b4a22bf58df4a686f51",
+                       "UiReportSHA256":  "a624d1a7fef108dbdde3736a3e63243e485da6db3b83ec01a79410f863b4fcbc",
+                       "CTestLogSHA256":  "66d1908e4d196adc537f120edab1b55d773e2a834d3b087e2b6be8ef366f9a42",
+                       "ExecutableSHA256":  "1369263de9c1da1f95b8c5df051464e30af8219fc3b23e19b26aa400fa2bf80c"
+                   },
+                   {
+                       "Configuration":  "Asan232",
+                       "Passed":  true,
+                       "CtestSuites":  13,
+                       "NativeUiChecks":  99,
+                       "CoreGroups":  26,
+                       "CoreChecks":  79401,
+                       "StressFrames":  202000,
+                       "HotPathAllocations":  0,
+                       "ReferenceCases":  107,
+                       "NewRemapGroupPassed":  true,
+                       "CoreReportSHA256":  "425c16f92a9d4a0aa5ba26b5ccab03139a0e0c7b5120afe5d94cc6e260a076ce",
+                       "UiReportSHA256":  "0a4dc368935561238e9112ea7ac69cd9577f2f597871cacc093583f168e09feb",
+                       "CTestLogSHA256":  "a28b1033f2e675df637879b0eb3b868a46c970132b0d038ddfa035ad8f9637eb",
+                       "ExecutableSHA256":  "130ab2aacc4b6bb8d774142814dd2ce6138b7aebd7c225918f86c69650af4aba"
+                   }
+               ],
+    "Remap":  {
+                  "PhysicalTargetPreserved":  true,
+                  "InactiveSourceDoesNotWriteTarget":  true,
+                  "ButtonAndTriggerMerge":  "Maximum of current target and active physical source",
+                  "SignedAxisHatRawConflict":  "Active source takes priority",
+                  "UnavailableEndpointsDoNothing":  true,
+                  "SameControlDoesNothing":  true,
+                  "PressCombinationsAndBothReleaseOrdersTested":  true,
+                  "MultipleSourcesTested":  true,
+                  "ComboSuspensionTested":  true,
+                  "RemapAddsNoTimedPolling":  true
+              },
+    "HistoricalReference":  {
+                                "Cases":  107,
+                                "FramesPerCase":  16,
+                                "ExpectedHashesAndFaultsUnchanged":  true,
+                                "LegacyRemapSourcesExpanded":  4,
+                                "ExpectedHashesRegeneratedFromCurrentInterpreter":  false
+                            },
+    "Backend":  {
+                    "CaptureWorkerUiAndSdkUnchanged":  true,
+                    "InstallerUnchanged":  true,
+                    "InstallerRelease":  "1.0.7.0-demo",
+                    "KernelVersion":  "1.0.5.0",
+                    "SdkVersion":  "1.0.4.2",
+                    "InstallerSHA256":  "6b1d2eae8c80d102f162f2395445d920a88380cc8cec9b7f33fbfe50db01a6a3",
+                    "HistoricalLiveTestsRepeated":  false
+                },
+    "SourceHashes":  [
+                         {
+                             "Path":  "CMakeLists.txt",
+                             "SHA256":  "18070fd87c8a35501e5323cb8a2103d5cb81065a5f223f8e81a63b81966ca7fa"
+                         },
+                         {
+                             "Path":  "App/App.rc",
+                             "SHA256":  "2038f38b8fe0fe1acc89ccf50650b9fe8312aef5ce7ea857d2331b398afb478a"
+                         },
+                         {
+                             "Path":  "App/app.manifest",
+                             "SHA256":  "114ec9e927c236155571a296e68ad912a0440e112f373e74ac495610546caf82"
+                         },
+                         {
+                             "Path":  "App/Tests/CoreTests.cpp",
+                             "SHA256":  "a9bbb273961625ee78805be66b6d3bf9b061b5dd22024ec3156cad3a33a2c1a7"
+                         },
+                         {
+                             "Path":  "App/Tests/CoreParityFixtures.h",
+                             "SHA256":  "1c3bd0ed733edf6718d58d9dfcd01a93220daa2bb9db0abad2d79dd0faa8199e"
+                         },
+                         {
+                             "Path":  "Scripts/01 - Button Remap.igc",
+                             "SHA256":  "e6019f34cb89a22acf1708b24d69d29c6fb54f2ff94e8a6504d0103f7b5ba1ae"
+                         },
+                         {
+                             "Path":  "Scripts/05 - Generic HID.igc",
+                             "SHA256":  "6f66190fb852aa976f97302c368adb8a5bac92e74ec59a474b87f2ba1479a228"
+                         },
+                         {
+                             "Path":  "App/Core/ControlFrame.cpp",
+                             "SHA256":  "572d95b9a24f6b8be0602e1d2e92b7464655d868fcfe96e83ccf49b5db131d17"
+                         },
+                         {
+                             "Path":  "App/Core/Script.h",
+                             "SHA256":  "27043e4dec7d2ef74aa209e79c64a302c64e5e196bdf5829eceffc864c65a4f7"
+                         },
+                         {
+                             "Path":  "App/Core/ScriptCompiler.cpp",
+                             "SHA256":  "7c15b68667416ff74ef781ef181c2afb090423a09a0cf6f4aacf77197ac85b42"
+                         },
+                         {
+                             "Path":  "App/Core/ScriptInstance.cpp",
+                             "SHA256":  "200c143199a57dec54e92059c978367239ed0f0755f04947f177d73425e453c9"
+                         },
+                         {
+                             "Path":  "App/Core/ScriptInternal.h",
+                             "SHA256":  "56212895e3a6921ccbb96f81fbadaa3b6707a51479d7718e8853d327d3b79ab9"
+                         },
+                         {
+                             "Path":  "App/Core/VisualDocument.cpp",
+                             "SHA256":  "22bad97eed58144ade905bdea49e8deaae0f724c944ff73eabaf94a07c8f2980"
+                         },
+                         {
+                             "Path":  "App/Core/VisualDocument.h",
+                             "SHA256":  "d3fc71e062d2e9fb106224234354ece16010b67b5d3b80f82fdfd310f4f6b1b4"
+                         }
+                     ]
+}

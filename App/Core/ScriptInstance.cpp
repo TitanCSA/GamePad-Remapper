@@ -307,7 +307,11 @@ struct ScriptInstance::Impl {
             a = Control(a);
             b = Control(b);
             if (a != b && frame->Available[a] && frame->Available[b]) {
-                Set(b, frame->Physical[a]);
+                if (Active(a, frame->Physical[a], true)) {
+                    const bool unsignedTarget = (b >= 4 && b < 96) || (b >= 160 && b < 192);
+                    Set(b, unsignedTarget ? std::max(frame->Values[b], frame->Physical[a])
+                                          : frame->Physical[a]);
+                }
                 Set(a, Neutral(a));
             }
             return 0;

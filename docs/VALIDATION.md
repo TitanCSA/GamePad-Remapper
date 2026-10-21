@@ -1,5 +1,36 @@
 # Validation
 
+## 2.3.2 remap keeps the target usable
+
+`remap(A, B)` now redirects A while keeping physical B functional. An inactive
+source never writes a neutral value to the target. Active button and trigger
+sources merge with the target's current value, so multiple sources cannot cancel
+each other. Signed axes, hats and raw values keep active-source priority. The
+availability guard and same-control no-op are unchanged.
+
+The native interpreter tests exercise native button aliases and generic HID
+buttons, all press combinations, both release orders, partial availability,
+multiple sources, analog pressure, trigger strength, signed axes, neutral/north
+hat values, prior target edits and combo suspension. The existing 202,000-frame
+stress and zero-allocation assertion remain enabled. Current results and exact
+inputs are recorded in [remap-validation.json](remap-validation.json).
+
+All 13 CTest suites and 99 native UI checks pass in Release and AddressSanitizer.
+The compiler/interpreter suite passes 26 groups and 79,401 assertions, including
+122 new remap assertions. Its 202,000 stress frames allocate no VM memory after
+warmup. These measurements describe software execution, not hardware latency.
+
+The old managed-reference hashes and fault outcomes are unchanged. Four frozen
+fixture sources now spell out their historical overwrite-style remap using
+`get_ival`/`set_val`, preserving that reference contract explicitly. The new
+behavior is checked separately by expected input/output states; reference hashes
+were not regenerated from the changed interpreter.
+
+The SDK, signed driver, capture worker and UI implementation are unchanged from
+2.3.1. Tests are offline software fixtures; this update does not repeat physical
+controller or Windows-consumer measurements. Historical live results below
+retain their original scope.
+
 ## 2.3.1 automatic observation and controls
 
 Normal interactive startup requests administrator rights before opening the

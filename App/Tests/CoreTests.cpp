@@ -506,6 +506,87 @@ int main(int argc, char **argv) {
                 }
             }
         });
+        Test("remap preserves destination input", [] {
+            for (const auto &names : std::vector<std::pair<std::string, std::string>>{
+                     {"A", "B"}, {"CROSS", "CIRCLE"}, {"BUTTON_1", "BUTTON_2"}}) {
+                const auto a = Controls::Parse(names.first), b = Controls::Parse(names.second);
+                auto vm = ScriptCompiler::Compile("main{remap(" + names.first + "," + names.second + ");}")
+                              ->CreateInstance();
+                std::int64_t now = 0;
+                for (const auto state : std::vector<std::array<int, 3>>{
+                         {0, 0, 0}, {100, 0, 100}, {100, 100, 100}, {0, 100, 100}, {0, 0, 0},
+                         {0, 100, 100}, {100, 100, 100}, {100, 0, 100}, {0, 0, 0},
+                         {35, 80, 80}, {80, 35, 80}}) {
+                    auto f = Frame();
+                    f.Physical[a] = state[0];
+                    f.Physical[b] = state[1];
+                    vm->Execute(f, now += 4000, 4);
+                    Check(f.Values[a] == 0 && f.Values[b] == state[2],
+                          names.first + " remap preserves physical target and both release orders");
+                    Check(f.Physical[a] == state[0] && f.Physical[b] == state[1],
+                          "remapping never changes recorded physical input");
+                    Check(vm->NextWakeMilliseconds() == 0, "button remap adds no timed polling");
+                }
+                for (const bool sourceMissing : {false, true}) {
+                    auto f = Frame();
+                    f.Physical[a] = 100;
+                    f.Physical[b] = 100;
+                    f.Available[sourceMissing ? a : b] = false;
+                    vm->Execute(f, now += 4000, 4);
+                    Check(f.Values[a] == 100 && f.Values[b] == 100,
+                          "missing remap endpoints cannot consume either input");
+                }
+            }
+            auto vm = ScriptCompiler::Compile("main{remap(SOUTH,EAST);remap(WEST,EAST);}")->CreateInstance();
+            for (const int a : {0, 100})
+                for (const int b : {0, 100})
+                    for (const int x : {0, 100}) {
+                        auto f = Frame();
+                        f.Physical[10] = a;
+                        f.Physical[11] = b;
+                        f.Physical[12] = x;
+                        vm->Execute(f, 0, 0);
+                        Check(f.Values[10] == 0 && f.Values[12] == 0 &&
+                                  f.Values[11] == (a || b || x ? 100 : 0),
+                              "multiple button sources combine without cancelling one another");
+                    }
+            auto f = Frame();
+            f.Physical[10] = 100;
+            ScriptCompiler::Compile("main{remap(SOUTH,SOUTH);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[10] == 100, "remapping to the same control leaves it usable");
+            f = Frame();
+            f.Physical[5] = 85;
+            f.Physical[4] = 25;
+            ScriptCompiler::Compile("main{remap(LT,RT);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[4] == 0 && f.Values[5] == 85, "trigger remapping preserves the stronger target");
+            f = Frame();
+            f.Physical[0] = 0;
+            f.Physical[2] = -45;
+            ScriptCompiler::Compile("main{remap(LX,RX);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[2] == -45, "a centered source axis leaves the target axis usable");
+            f.Physical[0] = -30;
+            ScriptCompiler::Compile("main{remap(LX,RX);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[0] == 0 && f.Values[2] == -30, "an active signed source keeps its direction");
+            f = Frame();
+            f.Physical[193] = 4;
+            ScriptCompiler::Compile("main{remap(HAT_1,HAT_2);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[192] == -1 && f.Values[193] == 4,
+                  "a neutral source hat cannot erase the target direction");
+            f.Physical[192] = 0;
+            ScriptCompiler::Compile("main{remap(HAT_1,HAT_2);}")->CreateInstance()->Execute(f, 0, 0);
+            Check(f.Values[192] == -1 && f.Values[193] == 0, "hat north is active even though its value is zero");
+            auto earlier = Run("main{set_val(EAST,100);remap(SOUTH,EAST);}");
+            Check(earlier.Values[11] == 100, "an idle source preserves an earlier target modification");
+            vm = ScriptCompiler::Compile("init{combo_run(Map);} main{} combo Map{remap(SOUTH,EAST);wait(50);}")
+                     ->CreateInstance();
+            f = Frame();
+            f.Physical[11] = 100;
+            vm->Execute(f, 0, 0);
+            Check(f.Values[11] == 100, "an inactive remap inside a combo preserves target input");
+            f.Physical[11] = 0;
+            vm->Execute(f, 10000, 10);
+            Check(f.Values[11] == 0, "an inactive combo remap cannot hold the physical target button");
+        });
         Test("control-specific transform saturation", [] {
             auto f = Frame();
             f.Physical[0] = 55;

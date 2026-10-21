@@ -8,10 +8,10 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.3.1:** **IN / OUT** observation starts automatically when the app opens,
-with automatic reconnection and no enable button. **Driver setup** is on the
-left and the searchable **☰ Scripts** menu is on the right. Clickable controls
-show a hand cursor. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
+**2.3.2:** `remap(A, B)` now keeps the physical **B** button usable: **A → B**
+and **B → B**. Multiple button sources combine without cancelling each other.
+Automatic **IN / OUT**, controller tabs and the searchable Scripts menu remain
+available. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
 **1.0.5.0** and SDK **1.0.4.2** are unchanged from 2.2.4.
 [Monitor details](docs/LIVE-MONITOR.md).
 
@@ -77,7 +77,7 @@ Measured inputs update directly, without animated or interpolated values.
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.3.1-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.3.2-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorGamepadControllerSetup.exe`** from this ZIP to install or update the controller driver to **1.0.5.0**. If that kernel is already installed and its device associations are complete, continue to step 3. Older kernels cannot provide continuous IN / OUT telemetry.
    **Driver setup** checks the installer's edition before launching it; a classic

@@ -50,7 +50,7 @@ driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-Version **2.3.1** packages the same **1.0.7.0-demo** controller installer as 2.2.4, with
+Version **2.3.2** packages the same **1.0.7.0-demo** controller installer as 2.2.4, with
 Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. Supply that release's
 original installer to `-DriverInstaller`; older installers and the classic
 Interceptor edition are rejected. Release tags, installer VERSIONINFO and kernel
@@ -74,8 +74,9 @@ Packaging also rejects managed or AddressSanitizer-instrumented application
 binaries. It copies the supplied driver installer unchanged; no signing tool,
 private key or kernel source is needed to build the application.
 
-The 2.3.1 interface changes do not change the driver protocol, capture worker or
-input processing. The inspector paints the latest measured values directly;
+Version 2.3.2 changes the script interpreter's `remap` behavior to preserve the
+target's physical input. The driver protocol and capture worker are unchanged.
+The inspector paints the latest measured values directly;
 its short interface animations are separate from report delivery. Render tests
 produce explicitly simulated previews, including multiple controller tabs and
 the searchable library popup. They do not establish new physical-device support

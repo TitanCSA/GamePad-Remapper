@@ -28,6 +28,15 @@ Axis values use `-100..100`, triggers `0..100`, buttons `0/100`, and hats `-1` (
 
 Decoded relative scalars represent movement in the current physical report, not a held position. They return to zero for timer work and unrelated reports; synthetic templates neutralize those previous deltas so an unrelated timed button press does not replay movement. Explicit raw `VALUE_n` writes can generate new relative movement in their owning report. Unknown bytes and wide binary fields remain outside this scalar behavior; no vendor-specific interpretation is invented.
 
+Since **2.3.2**, `remap(A, B)` means **A produces B, and physical B still produces B**.
+Releasing either button does not cancel the other. Several button or trigger
+sources can feed the same target; the strongest current value wins. The source
+is neutralized only when both endpoints exist. Signed axes, hats and raw values
+use the active source value, leaving the target unchanged while the source is
+neutral; a hat's neutral is `-1`, so north (`0`) remains an active direction.
+Use `swap(A, B)` to exchange the two buttons. These rules also apply to visual
+Remap rules and generic HID controls such as `BUTTON_1` and `BUTTON_2`.
+
 ## Builtins
 
 | Function | Result / effect |
@@ -45,7 +54,7 @@ Decoded relative scalars represent movement in the current physical report, not 
 | `get_phase(periodMs)` | Monotonic elapsed milliseconds modulo `periodMs`, in `0..periodMs-1`. Period `1..86,400,000 ms`; the 64-bit clock is reduced before conversion to `int`. |
 | `is_available(control)` | Whether this report/device exposes that control. |
 | `get_controller()`, `get_device()` | Native family ID or current capture-local device key. |
-| `remap(source, target)` | Copy physical source to target and neutralize source. Does nothing unless both controls are available, so a missing target cannot consume an existing button. |
+| `remap(source, target)` | Redirect the physical source to the target and neutralize the source, preserving the target's own input. A released source leaves the target unchanged. Buttons/triggers merge with the greater current value; active sources take priority for axes/hats/raw values. Missing endpoints or identical controls do nothing. |
 | `swap(first, second)` | Exchange current output values when both controls are available; otherwise leave them unchanged. |
 | `invert(control)` | Negate the current value; useful for signed axes. |
 | `block(control, milliseconds)` | Neutralize until the monotonic deadline. Calling again restarts the deadline; `0` cancels. |
