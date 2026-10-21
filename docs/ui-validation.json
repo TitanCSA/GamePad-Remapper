@@ -1,0 +1,291 @@
+{
+    "Schema":  1,
+    "Passed":  true,
+    "Version":  "2.3.0",
+    "CreatedUtc":  "2026-10-21T12:38:55.6424801Z",
+    "ComparedWithCommit":  "05e76b5ba0e77350638426faf193f463150e6737",
+    "Scope":  "Native Windows UI and isolated software fixtures. No physical controller, host input, driver or VM was opened. Not a physical latency or compatibility measurement.",
+    "HostDriverOpened":  false,
+    "CaptureStarted":  false,
+    "VmAccessed":  false,
+    "PhysicalControllerTested":  false,
+    "ProductionExecutableSHA256":  "8e63634abd6c68c4ac01df7fb21509434df7887b02e5365f87d72c46f1c06bc1",
+    "AsanToolset":  "14.44.35207",
+    "Builds":  [
+                   {
+                       "Configuration":  "Release230",
+                       "Passed":  true,
+                       "CtestSuites":  13,
+                       "NativeUiChecks":  95,
+                       "ControllerViewChecks":  40,
+                       "ScriptLibraryChecks":  72,
+                       "ScriptPanelChecks":  196,
+                       "WidgetChecks":  6128,
+                       "WidgetLifetimeCycles":  100,
+                       "WidgetDpiCases":  [
+                                              96,
+                                              144,
+                                              192
+                                          ],
+                       "UiReportSHA256":  "a75ed201dfad190af85d3008af0b99bd6925a13824f944d3eed7831cb25716cf",
+                       "CTestLogSHA256":  "381bd0b75f7fe20d1c9eb2a31af0e27f1c86d204797ac212370a94a928903524",
+                       "WidgetReportSHA256":  "39600164f12d943f2bdbd47a75a5df0d1522bdd12246796210bf4bef41c6de8b",
+                       "ExecutableSHA256":  "8e63634abd6c68c4ac01df7fb21509434df7887b02e5365f87d72c46f1c06bc1"
+                   },
+                   {
+                       "Configuration":  "Asan230",
+                       "Passed":  true,
+                       "CtestSuites":  13,
+                       "NativeUiChecks":  95,
+                       "ControllerViewChecks":  40,
+                       "ScriptLibraryChecks":  72,
+                       "ScriptPanelChecks":  196,
+                       "WidgetChecks":  6128,
+                       "WidgetLifetimeCycles":  100,
+                       "WidgetDpiCases":  [
+                                              96,
+                                              144,
+                                              192
+                                          ],
+                       "UiReportSHA256":  "4729a78811f212e41ecc580de84395a8b267648012d88794ea503aed0bdd1758",
+                       "CTestLogSHA256":  "a29ac816ec6324d7ab5f12846145142f82edbc32291f3b967222ad2658ec7284",
+                       "WidgetReportSHA256":  "60b2744e0ea86d49977a53f93444960cbc2e00b25c7f7c8685433f0778d78407",
+                       "ExecutableSHA256":  "820c7e1c7e5075b653a6a777330e9bdcfb4100d97062438fc4d86773c1321470"
+                   }
+               ],
+    "ControllerStress":  {
+                             "SimulatedUpdates":  10000,
+                             "PaintsDuringStress":  100,
+                             "SameLayout":  true,
+                             "IdenticalRedrawPixelStability":  true,
+                             "UnselectedDeviceDoesNotRepaint":  true,
+                             "GdiLifetimeBounded":  true,
+                             "HardwareLatencyMeasured":  false
+                         },
+    "Backend":  {
+                    "CaptureEngineAndSdkUnchanged":  true,
+                    "InstallerUnchanged":  true,
+                    "InstallerRelease":  "1.0.7.0-demo",
+                    "KernelVersion":  "1.0.5.0",
+                    "SdkVersion":  "1.0.4.2",
+                    "InstallerSHA256":  "6b1d2eae8c80d102f162f2395445d920a88380cc8cec9b7f33fbfe50db01a6a3",
+                    "HistoricalValidation":  "monitor-validation.json",
+                    "HistoricalLiveTestsRepeated":  false
+                },
+    "SourceHashes":  [
+                         {
+                             "Path":  "CMakeLists.txt",
+                             "SHA256":  "e6d5275924e62585b8e6450d478a9a815ced7951ac6fe0b05c45be5e1496183d"
+                         },
+                         {
+                             "Path":  "App/App.rc",
+                             "SHA256":  "95d64a65903ce3056cff404ba6471fb707b4ed80a04f1979b219f050760e9f46"
+                         },
+                         {
+                             "Path":  "App/app.manifest",
+                             "SHA256":  "8649a267d7aa7be8f75333443f1cfa45adb71d51216e9f52c18310248e67bfb7"
+                         },
+                         {
+                             "Path":  "App/UI/ControllerMonitorView.cpp",
+                             "SHA256":  "6d0838bd7368af705952a156c17ba8500de45f65231afe872cca4c0638214fce"
+                         },
+                         {
+                             "Path":  "App/UI/ControllerMonitorView.h",
+                             "SHA256":  "dea390a4a9c19fa24ccf20ba3a7c109047a4c2771f25c98f71bfc7b1302200f1"
+                         },
+                         {
+                             "Path":  "App/UI/DriverSetup.cpp",
+                             "SHA256":  "e5554cfa2553eba99146695b55ef91290c12020608dec3f656f9f78e4999955f"
+                         },
+                         {
+                             "Path":  "App/UI/DriverSetup.h",
+                             "SHA256":  "fe11af44813a0ea27b778220e45777873df12c28739f0d0ca12893f0ed9706f2"
+                         },
+                         {
+                             "Path":  "App/UI/MainWindow.cpp",
+                             "SHA256":  "861034f378cf696ef05c09a78ece872ca5cad65da5c01fbb2f011c01a8d040ae"
+                         },
+                         {
+                             "Path":  "App/UI/MainWindow.h",
+                             "SHA256":  "961d0840b2eeb6702ac7dcc71451a0fcfc4cf2cc9252ebee7f07e5545a68d180"
+                         },
+                         {
+                             "Path":  "App/UI/NativeWidgets.cpp",
+                             "SHA256":  "4c126e8a3bb1fc74a70dbdc00538f3faccb2e1c5fe7bbc4a4c26078cd7edf56f"
+                         },
+                         {
+                             "Path":  "App/UI/NativeWidgets.h",
+                             "SHA256":  "2d139bf08e8b29f2f47f86a18c6daace2a7a7c762c82e3836dd55935d4b073bb"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptLibraryPopup.cpp",
+                             "SHA256":  "6c71e2c85c9bcabc85932e85f1c18f518906ad923a74f4b41cd878cf581c3306"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptLibraryPopup.h",
+                             "SHA256":  "46fe7077501cc72f6acd6664f6c9ebf72b34f76c7ad7acb4de6361710968e6d8"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptPanel.cpp",
+                             "SHA256":  "a92ba5b9776dd4e7a1eb6ce2175911b58256b4a27ce40f7dc2ed581fb8df9b3f"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptPanel.h",
+                             "SHA256":  "cebd5dbf48e4c76c12905228d6db0a1c93e344543fdbc388d03c9ebc7a9cb1fe"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptStorage.cpp",
+                             "SHA256":  "88e2914680af01cfe4c2df8edbd8b6345d981c8fbc2eabc1870b703b3891a168"
+                         },
+                         {
+                             "Path":  "App/UI/ScriptStorage.h",
+                             "SHA256":  "ef22310243af4cfe972099cb4314566b12d67c9c87be7b04347ad49e8fc0e5b4"
+                         },
+                         {
+                             "Path":  "App/UI/Theme.h",
+                             "SHA256":  "6b38749bb10a6c75732ef84f92faaeb0c54700196e07b6d07df43aeb86548798"
+                         },
+                         {
+                             "Path":  "App/Tests/CaptureTests.cpp",
+                             "SHA256":  "62b60282da8663ea8724496ba7e20991a6c2e5c5983c9b06cb73e766bfb45446"
+                         },
+                         {
+                             "Path":  "App/Tests/ClassicInstallerFixture.rc",
+                             "SHA256":  "6bc9071efdd2af3c45178e109687022d7731bb6e3ecac4cdc9c37a297ac48c1e"
+                         },
+                         {
+                             "Path":  "App/Tests/ControllerMonitorViewTests.cpp",
+                             "SHA256":  "5e4e36cf30d20f6a203f14a177a78b898a3662aa0d9de03a4cab0157e378b13f"
+                         },
+                         {
+                             "Path":  "App/Tests/CoreParityFixtures.h",
+                             "SHA256":  "5f8933eae2c01d5f056e4904906ad3c78720323090eb4f82378f24d34d63c75f"
+                         },
+                         {
+                             "Path":  "App/Tests/CoreTests.cpp",
+                             "SHA256":  "7b5538df2de05d62caa3bc607cbc64642f0ed38cd3f38b86111d144a58d8a700"
+                         },
+                         {
+                             "Path":  "App/Tests/DriverSetupTests.cpp",
+                             "SHA256":  "1c5bb8561419d2d4093f6f31b8e9736305674aef46aac2b30f022ded591a1776"
+                         },
+                         {
+                             "Path":  "App/Tests/GamepadInstallerFixture.rc",
+                             "SHA256":  "35ad0069ddad940e2b8f4246cae0cd1fa03e3a44957319efc19f72e0612f7b79"
+                         },
+                         {
+                             "Path":  "App/Tests/InstallerFixture.cpp",
+                             "SHA256":  "615da62649f95b7bb0368a03d99524ec81682fcd94acd9a024f6578cd2653376"
+                         },
+                         {
+                             "Path":  "App/Tests/LiveTests.cpp",
+                             "SHA256":  "127addea9ee6ef5e5e74e3190fe99a6744248c5c9e9eca932a9f4f64e371d27d"
+                         },
+                         {
+                             "Path":  "App/Tests/MonitorFixture.h",
+                             "SHA256":  "d861c7a3126a3fde3a2973272fd1b2174bc41a9e8fadd7943abf56af18a005c9"
+                         },
+                         {
+                             "Path":  "App/Tests/MonitorTests.cpp",
+                             "SHA256":  "b4ffd6b0827f99ea2b68e05acc77297b3d6a7aef8f29c5c49110b90e382d56a9"
+                         },
+                         {
+                             "Path":  "App/Tests/ParameterTests.cpp",
+                             "SHA256":  "985e2f6277bbcba801822870df444204cb309462976a458243540d2e6b740bdc"
+                         },
+                         {
+                             "Path":  "App/Tests/ScriptLibraryPopupTests.cpp",
+                             "SHA256":  "db72badaa19415fafb56c40722738ddf4bd4a3aa1149a45c17bb88ca002b2480"
+                         },
+                         {
+                             "Path":  "App/Tests/ScriptPanelTests.cpp",
+                             "SHA256":  "8297263f2bb989d8008a3f51d51fead39b9b49d74106c187863ad765432d9721"
+                         },
+                         {
+                             "Path":  "App/Tests/ServiceTests.cpp",
+                             "SHA256":  "a1381f84914798f43fc4333ab527640c2d036a91715253be385c24d29b77c107"
+                         },
+                         {
+                             "Path":  "App/Tests/SnapshotNotificationTests.cpp",
+                             "SHA256":  "5d159bd715e1af398866c4df7b4f0dfdf10ba6b73a22c1950d0903fceb2a359a"
+                         },
+                         {
+                             "Path":  "App/Tests/VisualFixtures.h",
+                             "SHA256":  "bb90cd0ffb912be3d87e083e96a077757e59ab9c321ef949da49ef95ea5560fd"
+                         },
+                         {
+                             "Path":  "App/Tests/VisualTests.cpp",
+                             "SHA256":  "12d537583ff85c608fdf6301988809fc6102a44fcbeec7e16292730e7d807171"
+                         },
+                         {
+                             "Path":  "App/Tests/WidgetTests.cpp",
+                             "SHA256":  "f4b2681a128e2e2829198a8a47b4589e5874a666cdf6852e05db54d92d6c2386"
+                         },
+                         {
+                             "Path":  "App/Tests/WorkerTests.cpp",
+                             "SHA256":  "c2fab7e5669ec34a98911cd5a2241a80e558d8f895af190fffba656e282fa689"
+                         }
+                     ],
+    "Screenshots":  [
+                        {
+                            "Path":  "docs/images/code-editor.png",
+                            "SHA256":  "2e199570f432a040a80614231f60f563330fd6a369400a7010a60ea109c5374f",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/compact-layout.png",
+                            "SHA256":  "763dc1e3a88b713aadc0e9e5101f29c6eed4a0b655bd895cf4b82a9c1f822bc4",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/controller-states.png",
+                            "SHA256":  "8d33211c0267fa0e2d3ef4e9d335dabcc6efeeb931f7afdf7f572fdaf06f000d",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/controls-state.png",
+                            "SHA256":  "aa7b506c8221a62880a9077405b5d15adec0310c607acfbee71bbb32e7caec52",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/dpi-150.png",
+                            "SHA256":  "c7eba08cb7e435caefcca9a387e8d4502549b56a1ce8f79717aad783efcaced8",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/dropdown-state.png",
+                            "SHA256":  "99b229abb85c0d0bbd4add30a3b83c4b3431d0c1109461f27cfbeae27db25f23",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/macro-editor.png",
+                            "SHA256":  "d689cea2e2f72c8b38e6a6dfe54451c91f73b0d32f0215656c892a2012f26d98",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/minimum-layout.png",
+                            "SHA256":  "6038a7ef14f8b581455414d7f23ae81938fd3b8f985c3dbf013fc7863630875e",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/motion-settings.png",
+                            "SHA256":  "958524fee3f646a25d6b1bf5bb3c779d841216f928daaa8fa9691656d82f3b42",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/script-library.png",
+                            "SHA256":  "04fd7de6288d4a559da78743e9e2f982a0cc23b4de162de70af62fc5c48a12ba",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/script-settings.png",
+                            "SHA256":  "8d33211c0267fa0e2d3ef4e9d335dabcc6efeeb931f7afdf7f572fdaf06f000d",
+                            "Simulated":  true
+                        },
+                        {
+                            "Path":  "docs/images/visual-editor.png",
+                            "SHA256":  "58e13ff8ca485ab79b28f03379c98710cb7221e5838dab6cff22f46a2d0fcc57",
+                            "Simulated":  true
+                        }
+                    ]
+}

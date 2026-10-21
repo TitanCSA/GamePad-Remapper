@@ -1,8 +1,10 @@
 # Live IN / OUT debugging
 
-Available in **2.2.4**, bundled with the **1.0.7.0-demo** Interceptor Gamepad &
-Controller installer and Microsoft-signed kernel **1.0.5.0**. Older kernels
-cannot supply this telemetry. The classic Interceptor driver is unchanged.
+The **2.3.0** inspector uses controller tabs and aligned IN/OUT rows. Continuous
+telemetry was introduced in 2.2.4; the bundled **1.0.7.0-demo** Interceptor
+Gamepad & Controller installer, Microsoft-signed kernel **1.0.5.0** and SDK
+**1.0.4.2** are unchanged. Older kernels cannot supply this telemetry.
+The classic Interceptor driver is unchanged.
 
 Open the application elevated, or choose **Enable live IN / OUT** in the right
 panel. Nothing needs to be loaded or applied. The monitor starts independently
@@ -17,14 +19,29 @@ does not pause or reset it. The monitor remains available after capture expiry.
 | **IN** | A report received on this filtered controller stack, before changes made at that layer. |
 | **OUT** | A successful report completion from the filter towards Windows, after any modification. |
 
-The columns show each available control side by side. HID controls come from
-their own descriptor; multiple reports and repeated axis usages stay distinct.
-Native XUSB/GIP states include partial Guide updates where available. A translated
-HID view is labeled by its family: it is a Windows-derived report, not another
-independent electrical USB measurement. Values
-remain `--` until measured, and `*` marks a difference. A quiet device keeps its
-last measured value and timestamp; an error or lost report never becomes a
-fabricated neutral state.
+Select a **controller tab** above the inspector. Selection stays on the same
+device when its values change, and the view keeps each control in a fixed row.
+Only the selected device is displayed. Use the scrollbar or keyboard navigation
+to reach additional controls, and drag the divider to give the inspector more
+space. Selecting another tab does not change capture or the running script.
+
+The columns show each available control side by side: button states, axis
+percentages and bars, triggers, hats and other decoded controls. **Blue OUT**
+marks a difference from a known IN value; **—** means that direction has not
+been measured. HID controls come from their own descriptor; multiple reports
+and repeated axis usages stay distinct. Native XUSB/GIP states include partial
+Guide updates where available. A translated HID view is labeled by its family:
+it is a Windows-derived report, not another independent electrical USB
+measurement. One physical controller can expose more than one filtered
+collection or transport view.
+
+A quiet device keeps its last measured value and timestamp; an error or lost
+report never becomes a fabricated neutral state. Value changes repaint the
+affected area without rewriting the entire text view or moving neighboring
+rows. Numeric fields have fixed positions and update directly: measured values
+are never eased, interpolated or delayed for interface animation.
+
+![Tabbed controller inspector with independent IN and OUT; simulated preview](images/controller-states.png)
 
 **Copy diagnostics** includes device identity, raw bytes, IN/OUT sequence numbers,
 QPC timestamps and age, Windows/driver failures and lost-report counts. A slow
@@ -38,6 +55,9 @@ Windows scheduling and display refresh. OUT is the report submitted at a success
 driver completion, not a guarantee that a particular game, browser or API read it.
 Several Windows HID readers can produce several OUT completions for one IN;
 their queues may also have different ages. These counts are not controller FPS.
+Control hover, press and toggle animations last about 120 ms and stop when
+settled. They respect Windows' animation preference and **… → Reduce interface
+motion**; the input measurements themselves do not animate.
 
 To debug a script, compare IN with OUT before applying it, apply the script,
 then press **Stop** and compare again. Continue moving the controller after Stop:

@@ -61,6 +61,54 @@ void Pump() {
         DispatchMessageW(&message);
     }
 }
+void PumpFor(DWORD milliseconds) {
+    const auto end = GetTickCount64() + milliseconds;
+    do {
+        Pump();
+        const auto now = GetTickCount64();
+        if (now >= end)
+            break;
+        MsgWaitForMultipleObjectsEx(0, nullptr, static_cast<DWORD>(end - now), QS_ALLINPUT,
+                                    MWMO_INPUTAVAILABLE);
+    } while (true);
+    Pump();
+}
+struct AnimationTrace {
+    int Timers = 0;
+    bool DestroyOnTimer = false;
+    bool Destroyed = false;
+};
+constexpr UINT_PTR AnimationTraceId = 0x47505454;
+LRESULT CALLBACK TraceAnimation(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR,
+                                DWORD_PTR reference) {
+    auto &trace = *reinterpret_cast<AnimationTrace *>(reference);
+    if (message == WM_TIMER) {
+        ++trace.Timers;
+        if (trace.DestroyOnTimer) {
+            DestroyWindow(window);
+            return 0;
+        }
+    }
+    if (message == WM_NCDESTROY) {
+        trace.Destroyed = true;
+        RemoveWindowSubclass(window, TraceAnimation, AnimationTraceId);
+    }
+    return DefSubclassProc(window, message, w, l);
+}
+void ObserveAnimation(HWND window, AnimationTrace &trace) {
+    Check(SetWindowSubclass(window, TraceAnimation, AnimationTraceId,
+                            reinterpret_cast<DWORD_PTR>(&trace)) != FALSE,
+          "Offline widget animations must remain observable through an ordinary native subclass.");
+}
+void Hover(HWND window) {
+    SendMessageW(window, WM_MOUSEMOVE, 0, MAKELPARAM(20, 12));
+    // Synthetic messages must not leave a real cursor tracker on the host.
+    TRACKMOUSEEVENT cancel{sizeof(cancel), TME_CANCEL | TME_LEAVE, window, 0};
+    TrackMouseEvent(&cancel);
+    MSG queued{};
+    while (PeekMessageW(&queued, window, WM_MOUSELEAVE, WM_MOUSELEAVE, PM_REMOVE)) {
+    }
+}
 class Window final {
     HWND value_ = nullptr;
 
@@ -191,6 +239,133 @@ void ReentrantDestruction(HWND parent) {
     SetWindowTextW(edit, L"Rebuild current form");
     Check(!IsWindow(edit) && !destroyOnNotification,
           "A styled edit can be destroyed while its native text-change notification is running.");
+}
+void AnimationContracts(HWND parent) {
+    // The window stays outside every monitor and never takes focus or injects
+    // input. It is visible only so Windows' real timer/paint lifecycle is tested.
+    ShowWindow(parent, SW_SHOWNOACTIVATE);
+    AnimationTrace trace;
+    Window button(Child(parent, L"BUTTON", L"", BS_PUSHBUTTON, 280, 8));
+    StyleButton(button);
+    ObserveAnimation(button, trace);
+    BOOL systemAnimation = FALSE;
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    const bool motion = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &systemAnimation, 0) &&
+                        systemAnimation &&
+                        SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+                        (contrast.dwFlags & HCF_HIGHCONTRASTON) == 0;
+    const auto hoverStarted = GetTickCount64();
+    Hover(button);
+    PumpFor(65);
+    Canvas moving(button);
+    if (motion) {
+        Check(trace.Timers > 0, "Visible hover transitions must progress using real window timers.");
+        Check(GetTickCount64() - hoverStarted >= 90 ||
+                  (moving.Pixel(12, 18) == Blue && moving.Pixel(244, 18) == Black),
+              "A hover transition must reveal its blue surface gradually without extra palette colours.");
+    } else
+        Check(trace.Timers == 0 && moving.Pixel(125, 18) == Blue,
+              "Windows reduced-motion or high-contrast preferences must settle without animation timers.");
+    PumpFor(150);
+    Canvas settled(button);
+    Check(settled.Pixel(125, 18) == Blue,
+          "A completed hover animation must reach the same readable native button state.");
+    const int settledTimers = trace.Timers;
+    PumpFor(70);
+    Check(trace.Timers == settledTimers, "Settled widgets must leave no idle animation timer running.");
+    SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+    SetAnimationsEnabled(button, false);
+    PumpFor(40);
+    const int reducedTimers = trace.Timers;
+    Hover(button);
+    Canvas reduced(button);
+    PumpFor(70);
+    Check(reduced.Pixel(125, 18) == Blue && trace.Timers == reducedTimers,
+          "The application reduce-motion switch must settle transitions and prevent new timers.");
+    SetAnimationsEnabled(button, true);
+    SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+    SendMessageW(button, WM_CANCELMODE, 0, 0);
+    PumpFor(35);
+    const int cancelledTimers = trace.Timers;
+    PumpFor(70);
+    Check(trace.Timers == cancelledTimers, "Cancelling a native interaction must stop its transition timer.");
+    Hover(button);
+    ShowWindow(button, SW_HIDE);
+    PumpFor(35);
+    const int hiddenTimers = trace.Timers;
+    PumpFor(70);
+    Check(trace.Timers == hiddenTimers, "Hidden controls must stop animation timers immediately.");
+    ShowWindow(button, SW_SHOWNOACTIVATE);
+    SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+    EnableWindow(button, FALSE);
+    PumpFor(35);
+    const int disabledTimers = trace.Timers;
+    PumpFor(70);
+    Check(trace.Timers == disabledTimers, "Disabling a native control must cancel pending animation work.");
+    AnimationTrace toggleTrace;
+    Window toggle(Child(parent, L"BUTTON", L"", BS_AUTOCHECKBOX, 281, 52));
+    StyleToggle(toggle);
+    ObserveAnimation(toggle, toggleTrace);
+    SendMessageW(toggle, BM_SETCHECK, BST_CHECKED, 0);
+    PumpFor(45);
+    SendMessageW(toggle, BM_SETCHECK, BST_UNCHECKED, 0);
+    PumpFor(170);
+    Canvas toggled(toggle);
+    Check(toggled.Pixel(14, 18) == White && toggled.Pixel(34, 18) != White &&
+              SendMessageW(toggle, BM_GETCHECK, 0, 0) == BST_UNCHECKED,
+          "A reversed toggle animation must settle at its current native check state without drift.");
+    const int toggleTimers = toggleTrace.Timers;
+    PumpFor(70);
+    Check(toggleTimers == toggleTrace.Timers, "A reversed toggle must also leave no idle timer.");
+    Window compact(Child(parent, L"BUTTON", L"", BS_AUTOCHECKBOX, 284, 184));
+    StyleToggle(compact);
+    SetAnimationsEnabled(compact, false);
+    SetWindowPos(compact, nullptr, 8, 184, 48, 32, SWP_NOACTIVATE | SWP_NOZORDER);
+    SendMessageW(compact, BM_SETCHECK, BST_CHECKED, 0);
+    const auto previousFocus = SetFocus(compact);
+    SendMessageW(compact, WM_UPDATEUISTATE, MAKEWPARAM(UIS_CLEAR, UISF_HIDEFOCUS), 0);
+    Canvas focusedToggle(compact);
+    Check(GetFocus() == compact && focusedToggle.Pixel(0, 10) == White,
+          "A captionless compact toggle must show a distinct keyboard focus ring around its full track.");
+    SendMessageW(compact, WM_UPDATEUISTATE, MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS), 0);
+    Canvas hiddenFocusToggle(compact);
+    Check(hiddenFocusToggle.Pixel(0, 10) == Black,
+          "The compact toggle focus ring must obey Windows keyboard-focus visibility hints.");
+    SetFocus(previousFocus);
+    AnimationTrace destroyed;
+    Window doomed(Child(parent, L"BUTTON", L"", BS_PUSHBUTTON, 282, 96));
+    StyleButton(doomed);
+    ObserveAnimation(doomed, destroyed);
+    destroyed.DestroyOnTimer = motion;
+    Hover(doomed);
+    if (!motion)
+        DestroyWindow(doomed);
+    PumpFor(170);
+    Check(destroyed.Destroyed && !IsWindow(doomed),
+          "Destroying an animating native control from its timer callback must release its window safely.");
+    const auto gdiBefore = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    const auto userBefore = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    for (int i = 0; i < 32; ++i) {
+        AnimationTrace transient;
+        Window control(Child(parent, L"BUTTON", L"", BS_AUTOCHECKBOX, 283, 140));
+        StyleToggle(control);
+        ObserveAnimation(control, transient);
+        SendMessageW(control, BM_SETCHECK, BST_CHECKED, 0);
+        Canvas first(control);
+        SetWindowPos(control, nullptr, 8, 140, 310, 44, SWP_NOACTIVATE | SWP_NOZORDER);
+        Canvas resized(control);
+        SendMessageW(control, BM_SETCHECK, BST_UNCHECKED, 0);
+        DestroyWindow(control);
+        Check(transient.Destroyed,
+              "An interrupted resized toggle must destroy its animation and cached painting surface.");
+    }
+    PumpFor(160);
+    Check(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) <= gdiBefore + 2,
+          "Interrupted transitions, resizing and destruction must keep GDI resources bounded.");
+    Check(GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS) <= userBefore + 2,
+          "Interrupted transitions must release timers and native USER resources after destruction.");
+    ShowWindow(parent, SW_HIDE);
+    Pump();
 }
 void DragThumb(HWND window, int which = SB_VERT) {
     SCROLLBARINFO bar{sizeof(bar)};
@@ -447,6 +622,7 @@ int wmain(int argc, wchar_t **argv) {
                                       nullptr, nullptr, type.hInstance, nullptr));
         Cycle(parent, true);
         ReentrantDestruction(parent);
+        AnimationContracts(parent);
         ScrollContracts(parent);
         for (int i = 0; i < 4; ++i)
             Cycle(parent, false);
@@ -474,7 +650,7 @@ int wmain(int argc, wchar_t **argv) {
     report["user_after"] = userAfter;
     report["elapsed_ms"] =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-    report["scope"] = "Hidden native controls, local control messages and offscreen painting only; no "
+    report["scope"] = "Offscreen native controls, local control messages, animation timers and painting only; no "
                       "host input, capture service, driver, clipboard or file dialogs.";
     if (!destination.empty()) {
         if (destination.has_parent_path())

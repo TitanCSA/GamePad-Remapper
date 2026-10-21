@@ -15,9 +15,16 @@ class ScriptPanel final {
     ScriptInterface schema_;
     ParameterValues values_{};
     std::vector<HWND> children_, inputs_, readouts_;
-    std::vector<int> tops_, heights_;
+    enum class RowKind { Normal, SliderHeading, Toggle };
+    struct Row {
+        HWND Window = nullptr, Trailing = nullptr;
+        RowKind Kind = RowKind::Normal;
+        int Height = 0, Before = 0, After = 6;
+        bool Wrap = false, Heading = false;
+    };
+    std::vector<Row> rows_;
     int contentHeight_ = 0, scroll_ = 0;
-    bool building_ = false;
+    bool building_ = false, layingOut_ = false;
     std::function<void(std::size_t, int)> changed_;
     std::function<void(const std::string &)> error_;
     static LRESULT CALLBACK Procedure(HWND, UINT, WPARAM, LPARAM);

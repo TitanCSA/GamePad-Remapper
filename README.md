@@ -8,33 +8,39 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.2.4:** continuous, side-by-side **IN / OUT** debugging, including when no script is loaded. Includes the **1.0.7.0-demo** controller installer with Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. [Monitor details](docs/LIVE-MONITOR.md).
+**2.3.0:** a searchable **Scripts** popup, controller tabs, a stable **IN / OUT**
+inspector and an adjustable workspace. Live observation works without a loaded
+script. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
+**1.0.5.0** and SDK **1.0.4.2** are unchanged from 2.2.4.
+[Monitor details](docs/LIVE-MONITOR.md).
 
 Two workspaces, **Use script** and **Edit script**. Script authors declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block; players adjust them without touching the code. Settings are remembered per file and update a running script without recompilation or resetting its macros. [Create a script interface](docs/SCRIPT-INTERFACE.md).
 
 Scripts execute in the application. Captured reports are modified and returned through the kernel filter, feeding the associated device's native Windows input paths, including XInput and translated HID views for supported XUSB/GIP controllers. No per-game integration is required. Support depends on the captured transport and collection; vendor paths outside that filter and unsupported formats are not covered. See [low-level routing and validation](docs/VALIDATION.md).
 
-| Use a script | Edit its code |
-| --- | --- |
-| ![Script-defined sliders, switch and dropdown; simulated session](docs/images/script-settings.png) | ![IGC code editor; simulated device preview](docs/images/code-editor.png) |
+![Script settings beside the tabbed controller IN / OUT inspector; simulated session](docs/images/script-settings.png)
 
 Screenshots show the real native Windows interface with explicitly simulated controller
 activity. Normal use displays actual driver state and never invents devices.
 
 <details>
-<summary>Macro designer</summary>
+<summary>Script menu and code editor</summary>
 
-![Timed macro steps and editable script constants](docs/images/macro-editor.png)
+![Searchable Scripts popup with grouped examples and saved scripts](docs/images/script-library.png)
+
+![IGC code editor beside the live controller inspector; simulated session](docs/images/code-editor.png)
 
 </details>
 
-The interface uses four colors: **blue, black, white and gray**. Consistent
-controls, clear keyboard focus and readable spacing keep the script, visual
-settings and live session easy to distinguish.
+The interface uses **blue, black, white and gray**, with clear keyboard focus
+and short control animations. **Quick actions → Reduce interface motion**
+disables those animations; Windows' reduced-animation preference is respected.
+Drag the divider between the script and inspector to change their widths.
+Measured inputs update directly, without animated or interpolated values.
 
 ## Two workspaces, one script
 
-- **Use script:** pick a saved script, adjust its custom settings and apply it.
+- **Use script:** open **☰ Scripts**, choose a script, adjust its settings and apply it.
   Sliders, switches, selections and numeric fields come directly from its `ui`
   declaration. Parameter edits apply immediately to the active version, with
   no Live apply switch required. **Reset settings** restores the author's defaults.
@@ -47,30 +53,30 @@ settings and live session easy to distinguish.
   double taps and axis thresholds; timed sequences or figure-eight, circle and
   sine motion. Add the ready-to-edit infinity recipe with one click.
   Advanced code is preserved when switching views.
-- **Library:** create, open and save `.igc` files; atomic saves keep the previous
-  version as `.bak`. Unsaved edits get recovery drafts. Saved scripts are
-  available from the sidebar.
+- **Scripts:** search examples and saved files in a grouped popup instead of a
+  permanent sidebar. The **…** menu holds **New script**, **Open file**,
+  **Save a copy**, the scripts folder and draft recovery when available.
+  Atomic saves keep the previous version as `.bak`; unsaved edits get recovery drafts.
 - **Apply script:** compile and apply behavior to captured controllers.
   **Stop** releases capture. Applying a script updates user-mode behavior; it
   does not load script code into the kernel or flash controller firmware.
 - **Fewer clicks:** automatic background validation, readable behavior summaries,
   connected controls first in selectors, and optional **Live apply valid edits**.
   Invalid edits keep the last working configuration.
-- **Live IN / OUT:** the right panel continuously shows what
-  the filter receives from each controller beside the reports it completes
-  to Windows. No script or capture context is required. Applying a script
-  changes OUT; **Stop** restores passthrough and leaves the monitor running.
-  `*` marks different values and `--` means a value has not been measured.
-  Multiple HID reports retain independent field validity. Event-driven updates,
-  raw bytes, timestamps, report counts, losses and copyable diagnostics help
-  debug the full path. OUT measures the driver's Windows completion boundary;
-  it does not confirm that every application has consumed the report.
+- **Live IN / OUT:** select a controller tab on the right. Each control has a
+  fixed row with its received **IN** and Windows-completed **OUT** beside it;
+  changed OUT values are blue and **—** means not measured. Axis bars and button
+  states update without rebuilding the text layout. Scroll to see additional
+  controls. Applying a script changes OUT; **Stop** restores passthrough and
+  leaves observation running. **Copy diagnostics** includes raw reports,
+  timestamps, counts and errors. OUT measures the driver's Windows completion
+  boundary; it does not confirm that every application has consumed the report.
 
 ## Start
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.2.4-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.3.0-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorGamepadControllerSetup.exe`** from this ZIP to install or update the controller driver to **1.0.5.0**. If that kernel is already installed and its device associations are complete, continue to step 3. Older kernels cannot provide continuous IN / OUT telemetry.
    **Driver setup** checks the installer's edition before launching it; a classic
@@ -79,8 +85,9 @@ Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
 3. Open **`GamePadRemapper.exe`**. Choose **Enable live IN / OUT** to observe
    controllers without applying a script; an elevated launch starts the monitor
-   automatically. Select an example or create a script. Editing and compiling
-   work without an installed driver or administrator rights.
+   automatically. Select the controller's tab on the right, then open
+   **☰ Scripts** to choose an example. Use **… → New script** to start your own.
+   Editing and compiling work without an installed driver or administrator rights.
 4. In **Use script**, adjust the settings and choose **Apply script**
    (**Ctrl+Enter**). Use **Edit script** to change the code or visual rules.
    Approve Windows elevation when requested: the driver restricts capture to

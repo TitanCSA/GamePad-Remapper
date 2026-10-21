@@ -50,19 +50,33 @@ driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-Version **2.2.4** packages the **1.0.7.0-demo** controller installer with
+Version **2.3.0** packages the same **1.0.7.0-demo** controller installer as 2.2.4, with
 Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. Supply that release's
 original installer to `-DriverInstaller`; older installers and the classic
 Interceptor edition are rejected. Release tags, installer VERSIONINFO and kernel
 versions are recorded separately in the generated `package-manifest.json`.
 
-The ten CTest suites include passive driver-monitor fixtures, the script-interface compiler/VM fixtures,
+The thirteen CTest suites include passive driver-monitor fixtures, the script-interface compiler/VM fixtures,
 concurrent parameter-publication checks and the actual capture worker against
-an isolated transport. The offline UI test also exercises
-custom controls, sidecar/fallback storage, workspace switching and DPI/resource
-lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
+an isolated transport. **ControllerView** covers controller selection, stable
+IN/OUT rows, scrolling, field validity and bounded painting resources.
+**ScriptLibrary** covers grouped filtering, popup selection and keyboard behavior.
+**ScriptPanel** verifies measured wrapping of long descriptions, labels and help,
+slider readout spacing, native callbacks and scrolling, and preservation of
+controls and unfinished edits during resize and DPI changes.
+Native widget tests cover animation completion, reversal, cancellation,
+reduced motion, resizing and destruction. The offline UI test also exercises
+the Scripts menu, adjustable workspace, custom controls, sidecar/fallback storage,
+workspace switching and DPI/resource lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
 values and recovery drafts are excluded.
 
 Packaging also rejects managed or AddressSanitizer-instrumented application
 binaries. It copies the supplied driver installer unchanged; no signing tool,
 private key or kernel source is needed to build the application.
+
+The 2.3.0 interface changes do not change the driver protocol, capture worker or
+input processing. The inspector paints the latest measured values directly;
+its short interface animations are separate from report delivery. Render tests
+produce explicitly simulated previews, including multiple controller tabs and
+the searchable library popup. They do not establish new physical-device support
+or measure hardware latency. See [validation](VALIDATION.md) for test scope.

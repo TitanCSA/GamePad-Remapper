@@ -14,6 +14,9 @@ void StyleToggle(HWND window);
 void StyleComboBox(HWND window);
 void StyleEdit(HWND window);
 void StyleScrollbars(HWND window);
+// Disabling motion also settles any active transition immediately. Windows'
+// reduced-animation and high-contrast preferences always take precedence.
+void SetAnimationsEnabled(HWND window, bool enabled);
 // A DPI override is also used by offline render tests; zero follows Windows.
 void SetDpi(HWND window, UINT dpi);
 void SetAccessibleName(HWND window, const wchar_t *name);

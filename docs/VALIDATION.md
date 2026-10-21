@@ -1,5 +1,40 @@
 # Validation
 
+## 2.3.0 interface
+
+The native interface uses a searchable, grouped Scripts popup, separate controller
+tabs and fixed IN/OUT rows. The workspace divider is adjustable. Parameter labels
+and descriptions wrap when resized, and short control animations respect both
+the Windows preference and the application's Reduce interface motion setting.
+
+All **13 CTest suites** and **95 native UI checks** pass in optimized Release
+and AddressSanitizer builds. The changed interface has dedicated checks:
+
+| Suite | Checks | Scope |
+| --- | ---: | --- |
+| ControllerView | 40 | Selection through reorder/removal, independent field validity, scrolling, stable layout, unchanged/unselected snapshot repaint suppression, pixel stability and bounded GDI resources |
+| ScriptLibrary | 72 | Grouping, Unicode search, original-index selection, keyboard/focus handling, dismissal, reduced motion and large-list scrolling |
+| ScriptPanel | 196 | Text wrapping, resize and DPI reflow, retained focus/values/invalid edits, callbacks and resource lifetime |
+| Widgets | 6,128 | Native controls, animation completion/reversal/cancellation, reduced motion, DPI and resource lifetime |
+
+The controller-view stress fixture publishes 10,000 simulated updates with 100
+paints. It also checks that repeated identical painting yields identical pixels;
+old antialiased text cannot accumulate underneath new values. Values update
+directly, with no animation or interpolation of input data. These are software
+fixtures, not a measurement of physical input latency or display refresh rate.
+
+The native UI test covers script use/edit transitions, unsaved changes, menu
+discovery, multiple simulated controllers, diagnostic formatting on demand,
+compact/minimum layouts and high DPI. Rendered documentation images explicitly
+use simulated input. Current build hashes and scope are recorded in
+[ui-validation.json](ui-validation.json).
+
+The capture worker, SDK and driver package are unchanged from 2.2.4. This update
+does not open a host driver, install a driver or repeat the live VM/consumer
+tests below. Their historical results retain their original scope. The complete
+release continues to include the exact 1.0.7.0-demo installer with the
+Microsoft-signed 1.0.5.0 kernel.
+
 ## 2.2.4 continuous monitor
 
 The right panel observes independent IN and OUT telemetry, without a script or

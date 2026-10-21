@@ -14,7 +14,23 @@ namespace gpr::ui {
 namespace {
 constexpr UINT_PTR SubclassId = 0x47505257;
 constexpr UINT_PTR ScrollTimerId = 0x47505258;
+constexpr UINT_PTR AnimationTimerId = 0x47505259;
+constexpr ULONGLONG AnimationDuration = 120;
 enum class ControlKind { None, Button, Check, Combo, Edit };
+struct Visual {
+    float Hover = 0, Focus = 0, Pressed = 0, Checked = 0;
+    bool operator==(const Visual &other) const {
+        return Hover == other.Hover && Focus == other.Focus && Pressed == other.Pressed &&
+               Checked == other.Checked;
+    }
+};
+bool SystemMotionAllowed() {
+    BOOL animation = FALSE;
+    HIGHCONTRASTW contrast{sizeof(contrast)};
+    return SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0) && animation &&
+           SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+           (contrast.dwFlags & HCF_HIGHCONTRASTON) == 0;
+}
 struct State {
     unsigned References = 1;
     bool Destroyed = false;
@@ -22,12 +38,33 @@ struct State {
     ButtonKind Button = ButtonKind::Secondary;
     bool Hover = false, Selected = false, Scrollbars = false;
     bool Toggle = false;
+    bool AnimationEnabled = true, SystemMotion = SystemMotionAllowed();
+    bool VisualInitialized = false, Animating = false;
+    ULONGLONG AnimationStarted = 0;
+    Visual From{}, Current{}, Target{};
+    HDC Buffer = nullptr;
+    HBITMAP BufferBitmap = nullptr;
+    HGDIOBJ BufferPrevious = nullptr;
+    SIZE BufferSize{};
     UINT Dpi = 0;
     int DragBar = -1, DragOffset = 0;
     int RepeatBar = -1, RepeatAction = 0;
     bool EmbeddedEdit = false, PopupBorder = false;
     IAccPropServices *Accessibility = nullptr;
+    void DiscardBuffer() {
+        if (BufferPrevious)
+            SelectObject(Buffer, BufferPrevious);
+        if (BufferBitmap)
+            DeleteObject(BufferBitmap);
+        if (Buffer)
+            DeleteDC(Buffer);
+        Buffer = nullptr;
+        BufferBitmap = nullptr;
+        BufferPrevious = nullptr;
+        BufferSize = {};
+    }
     ~State() {
+        DiscardBuffer();
         if (Accessibility)
             Accessibility->Release();
     }
@@ -75,6 +112,68 @@ UINT Dpi(HWND window, const State &state) {
 }
 int Scale(HWND window, const State &state, int value) {
     return MulDiv(value, static_cast<int>(Dpi(window, state)), 96);
+}
+void SettleAnimation(HWND window, State &state) {
+    if (state.Animating)
+        KillTimer(window, AnimationTimerId);
+    state.Animating = false;
+    state.From = state.Current = state.Target;
+}
+void AdvanceAnimation(HWND window, State &state, ULONGLONG now) {
+    if (!state.Animating)
+        return;
+    const auto elapsed = now - state.AnimationStarted;
+    if (elapsed >= AnimationDuration) {
+        SettleAnimation(window, state);
+        return;
+    }
+    const float t = static_cast<float>(elapsed) / AnimationDuration;
+    const float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+    const auto value = [ease](float a, float b) { return a + (b - a) * ease; };
+    state.Current = {value(state.From.Hover, state.Target.Hover),
+                     value(state.From.Focus, state.Target.Focus),
+                     value(state.From.Pressed, state.Target.Pressed),
+                     value(state.From.Checked, state.Target.Checked)};
+}
+void RefreshAnimation(HWND window, State &state) {
+    if (state.Kind == ControlKind::None)
+        return;
+    const bool enabled = IsWindowEnabled(window) != FALSE;
+    const auto native = state.Kind == ControlKind::Button || state.Kind == ControlKind::Check
+                            ? SendMessageW(window, BM_GETSTATE, 0, 0)
+                            : 0;
+    const bool focused = GetFocus() == window ||
+                         (state.Kind == ControlKind::Combo &&
+                          (IsChild(window, GetFocus()) || SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0)));
+    const bool hoverVisible = state.Kind != ControlKind::Button ||
+                              (state.Button != ButtonKind::Primary && !state.Selected);
+    const Visual target{enabled && state.Hover && hoverVisible ? 1.0f : 0.0f,
+                        enabled && focused ? 1.0f : 0.0f,
+                        enabled && (native & BST_PUSHED) ? 1.0f : 0.0f,
+                        state.Kind == ControlKind::Check &&
+                                SendMessageW(window, BM_GETCHECK, 0, 0) != BST_UNCHECKED
+                            ? 1.0f : 0.0f};
+    const auto now = GetTickCount64();
+    AdvanceAnimation(window, state, now);
+    if (!state.VisualInitialized || !state.AnimationEnabled || !state.SystemMotion || !enabled ||
+        !IsWindowVisible(window)) {
+        state.Target = target;
+        state.VisualInitialized = true;
+        SettleAnimation(window, state);
+        return;
+    }
+    if (state.Target == target)
+        return;
+    state.From = state.Current;
+    state.Target = target;
+    state.AnimationStarted = now;
+    if (state.Current == target)
+        SettleAnimation(window, state);
+    else if (!state.Animating) {
+        state.Animating = SetTimer(window, AnimationTimerId, 15, nullptr) != 0;
+        if (!state.Animating)
+            SettleAnimation(window, state);
+    }
 }
 struct SavedDc {
     HDC Dc;
@@ -133,6 +232,14 @@ void Rounded(HDC dc, RECT rectangle, COLORREF fill, COLORREF border, int radius)
     SelectObject(dc, Pen(border));
     RoundRect(dc, rectangle.left, rectangle.top, rectangle.right, rectangle.bottom, radius, radius);
 }
+void Reveal(HDC dc, RECT rectangle, float amount, int radius) {
+    if (amount <= 0)
+        return;
+    rectangle.right = rectangle.left +
+                      static_cast<int>((rectangle.right - rectangle.left) * amount + 0.5f);
+    if (rectangle.right > rectangle.left)
+        Rounded(dc, rectangle, Blue, Blue, radius);
+}
 void Caption(HDC dc, HWND window, RECT rectangle, COLORREF colour, UINT flags) {
     const auto font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
     if (font)
@@ -150,17 +257,22 @@ void DrawButton(HWND window, HDC dc, const State &state) {
     GetClientRect(window, &rectangle);
     FillRect(dc, &rectangle, Brush(Black));
     const bool enabled = IsWindowEnabled(window) != FALSE;
-    const auto native = SendMessageW(window, BM_GETSTATE, 0, 0);
-    const bool pressed = (native & BST_PUSHED) != 0;
     const bool focus = GetFocus() == window;
     const bool primary = state.Button == ButtonKind::Primary || state.Selected;
-    COLORREF fill = enabled && !pressed && (primary || state.Hover) ? Blue : Black;
+    COLORREF fill = enabled && primary ? Blue : Black;
     COLORREF border = !enabled ? Gray : primary || state.Hover || focus ? Blue : Gray;
     InflateRect(&rectangle, -1, -1);
     Rounded(dc, rectangle, fill, border, Scale(window, state, 8));
-    if (focus && (SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) == 0) {
+    if (enabled && !primary) {
+        auto surface = rectangle;
+        InflateRect(&surface, -1, -1);
+        Reveal(dc, surface, state.Current.Hover, Scale(window, state, 6));
+    }
+    if (state.Current.Focus > 0 &&
+        (SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) == 0) {
         auto ring = rectangle;
-        InflateRect(&ring, -Scale(window, state, 3), -Scale(window, state, 3));
+        const int inset = Scale(window, state, 3 + static_cast<int>((1 - state.Current.Focus) * 3));
+        InflateRect(&ring, -inset, -inset);
         Frame(dc, ring, White);
     }
     if (state.Button == ButtonKind::Tab && state.Selected) {
@@ -168,8 +280,7 @@ void DrawButton(HWND window, HDC dc, const State &state) {
         line.top = line.bottom - std::max(2, Scale(window, state, 2));
         FillRect(dc, &line, Brush(White));
     }
-    if (pressed)
-        OffsetRect(&rectangle, 0, Scale(window, state, 1));
+    OffsetRect(&rectangle, 0, static_cast<int>(Scale(window, state, 1) * state.Current.Pressed + 0.5f));
     Caption(dc, window, rectangle, enabled ? White : Gray,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
@@ -184,18 +295,31 @@ void DrawCheck(HWND window, HDC dc, const State &state) {
         const int height = Scale(window, state, 24), width = Scale(window, state, 44);
         const int top = (rectangle.bottom - height) / 2;
         RECT track{Scale(window, state, 2), top, Scale(window, state, 2) + width, top + height};
-        Rounded(dc, track, enabled && checked ? Blue : Black,
+        Rounded(dc, track, Black,
                 enabled && (state.Hover || checked || GetFocus() == window) ? Blue : Gray, height);
+        if (enabled) {
+            auto surface = track;
+            InflateRect(&surface, -1, -1);
+            Reveal(dc, surface, state.Current.Checked, height);
+        }
         const int margin = Scale(window, state, 4), diameter = height - 2 * margin;
-        const int left = checked ? track.right - margin - diameter : track.left + margin;
+        const int travel = width - 2 * margin - diameter;
+        const int left = track.left + margin + static_cast<int>(travel * state.Current.Checked + 0.5f);
         SelectObject(dc, Brush(enabled ? White : Gray));
         SelectObject(dc, GetStockObject(NULL_PEN));
         Ellipse(dc, left, top + margin, left + diameter, top + margin + diameter);
         rectangle.left = track.right + Scale(window, state, 12);
         Caption(dc, window, rectangle, enabled ? White : Gray,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        if (GetFocus() == window)
-            Frame(dc, rectangle, Blue);
+        if (GetFocus() == window &&
+            (SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) == 0) {
+            if (GetWindowTextLengthW(window) == 0) {
+                auto ring = track;
+                InflateRect(&ring, Scale(window, state, 2), Scale(window, state, 2));
+                Frame(dc, ring, White);
+            } else
+                Frame(dc, rectangle, Blue);
+        }
         return;
     }
     const int size = Scale(window, state, 18);
@@ -246,8 +370,9 @@ void DrawCombo(HWND window, HDC dc, const State &state) {
     const bool enabled = IsWindowEnabled(window) != FALSE;
     const bool focus = GetFocus() == window || IsChild(window, GetFocus()) ||
                        SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0) != 0;
-    Frame(dc, rectangle, enabled && (state.Hover || focus) ? Blue : Gray,
-          focus ? std::max(1, Scale(window, state, 2)) : 1);
+    InflateRect(&rectangle, -1, -1);
+    Rounded(dc, rectangle, Black, enabled && (state.Hover || focus) ? Blue : Gray,
+            Scale(window, state, 8));
     const auto font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
     if (font)
         SelectObject(dc, font);
@@ -267,6 +392,44 @@ void DrawCombo(HWND window, HDC dc, const State &state) {
     SelectObject(dc, Brush(enabled ? White : Gray));
     SelectObject(dc, GetStockObject(NULL_PEN));
     Polygon(dc, arrow, static_cast<int>(std::size(arrow)));
+    const auto accent = std::max(state.Current.Focus, state.Current.Hover);
+    if (enabled && accent > 0) {
+        RECT line{Scale(window, state, 8), client.bottom - Scale(window, state, 3),
+                  client.right - Scale(window, state, 8), client.bottom - Scale(window, state, 2)};
+        line.right = line.left + static_cast<int>((line.right - line.left) * accent + 0.5f);
+        FillRect(dc, &line, Brush(Blue));
+    }
+}
+void PaintControl(HWND window, HDC dc, State &state) {
+    if (!dc)
+        return;
+    RECT client{};
+    GetClientRect(window, &client);
+    const int width = client.right, height = client.bottom;
+    if (state.BufferSize.cx != width || state.BufferSize.cy != height)
+        state.DiscardBuffer();
+    if (!state.Buffer && width > 0 && height > 0) {
+        state.Buffer = CreateCompatibleDC(dc);
+        if (state.Buffer)
+            state.BufferBitmap = CreateCompatibleBitmap(dc, width, height);
+        if (state.BufferBitmap) {
+            state.BufferPrevious = SelectObject(state.Buffer, state.BufferBitmap);
+            if (state.BufferPrevious && state.BufferPrevious != HGDI_ERROR)
+                state.BufferSize = {width, height};
+            else
+                state.DiscardBuffer();
+        } else
+            state.DiscardBuffer();
+    }
+    const auto target = state.Buffer ? state.Buffer : dc;
+    if (state.Kind == ControlKind::Button)
+        DrawButton(window, target, state);
+    else if (state.Kind == ControlKind::Check)
+        DrawCheck(window, target, state);
+    else
+        DrawCombo(window, target, state);
+    if (state.Buffer)
+        BitBlt(dc, 0, 0, width, height, state.Buffer, 0, 0, SRCCOPY);
 }
 void ComboMetrics(HWND window, const State &state) {
     SendMessageW(window, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), Scale(window, state, 30));
@@ -335,6 +498,12 @@ void DrawEditFrame(HWND window, HDC dc, const State &state) {
     GetClientRect(window, &rectangle);
     Frame(dc, rectangle, IsWindowEnabled(window) && GetFocus() == window ? Blue : Gray,
           GetFocus() == window ? std::max(1, Scale(window, state, 2)) : 1);
+    if (IsWindowEnabled(window) && state.Current.Focus > 0) {
+        RECT line{1, rectangle.bottom - std::max(2, Scale(window, state, 3)), rectangle.right - 1,
+                  rectangle.bottom - 1};
+        line.right = line.left + static_cast<int>((line.right - line.left) * state.Current.Focus + 0.5f);
+        FillRect(dc, &line, Brush(Blue));
+    }
 }
 struct Bar {
     RECT Bounds{}, Thumb{}, Track{};
@@ -529,6 +698,8 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
     StateReference lifetime(state);
     if (message == WM_NCDESTROY) {
         state->Destroyed = true;
+        KillTimer(window, AnimationTimerId);
+        KillTimer(window, ScrollTimerId);
         if (state->Accessibility) {
             const MSAAPROPID property = PROPID_ACC_NAME;
             state->Accessibility->ClearHwndProps(window, static_cast<DWORD>(OBJID_CLIENT), CHILDID_SELF,
@@ -573,18 +744,15 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
             if (state->Kind == ControlKind::Button || state->Kind == ControlKind::Check ||
                 state->Kind == ControlKind::Combo) {
                 PaintDc paint(window, message == WM_PRINTCLIENT ? reinterpret_cast<HDC>(w) : nullptr);
-                if (state->Kind == ControlKind::Button)
-                    DrawButton(window, paint.Dc, *state);
-                else if (state->Kind == ControlKind::Check)
-                    DrawCheck(window, paint.Dc, *state);
-                else
-                    DrawCombo(window, paint.Dc, *state);
+                AdvanceAnimation(window, *state, GetTickCount64());
+                PaintControl(window, paint.Dc, *state);
                 return 0;
             }
             const auto result = native();
             if (state->Destroyed)
                 return result;
             if (state->Kind == ControlKind::Edit) {
+                AdvanceAnimation(window, *state, GetTickCount64());
                 HDC dc = message == WM_PRINTCLIENT ? reinterpret_cast<HDC>(w) : GetDC(window);
                 if (dc) {
                     DrawEditFrame(window, dc, *state);
@@ -598,6 +766,15 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
         }
         if (message == WM_NCLBUTTONDOWN && state->Scrollbars && BeginScroll(window, *state, l))
             return 0;
+        if (message == WM_TIMER && w == AnimationTimerId) {
+            if (!state->AnimationEnabled || !state->SystemMotion || !IsWindowVisible(window) ||
+                !IsWindowEnabled(window))
+                SettleAnimation(window, *state);
+            else
+                AdvanceAnimation(window, *state, GetTickCount64());
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
+        }
         if (message == WM_TIMER && w == ScrollTimerId && state->RepeatBar >= 0) {
             const auto bar = ScrollBar(window, state->RepeatBar);
             POINT point{};
@@ -642,10 +819,12 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
             state->Hover = true;
             TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
             TrackMouseEvent(&track);
+            RefreshAnimation(window, *state);
             InvalidateRect(window, nullptr, FALSE);
         }
         if (message == WM_MOUSELEAVE) {
             state->Hover = false;
+            RefreshAnimation(window, *state);
             InvalidateRect(window, nullptr, FALSE);
         }
         if (state->EmbeddedEdit && (message == WM_SETFOCUS || message == WM_KILLFOCUS))
@@ -653,18 +832,30 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
         const auto result = native();
         if (state->Destroyed)
             return result;
+        if (message == WM_CANCELMODE)
+            state->Hover = false;
         if (state->Kind == ControlKind::Combo &&
             (message == WM_SETFONT || message == WM_DPICHANGED_AFTERPARENT))
             ComboMetrics(window, *state);
         if (state->Kind == ControlKind::Combo &&
             (message == CB_ADDSTRING || message == CB_INSERTSTRING) && result >= 0)
             ExpandComboWidth(window, static_cast<int>(result), *state);
+        if (message == WM_SETTINGCHANGE) {
+            state->SystemMotion = SystemMotionAllowed();
+            RefreshAnimation(window, *state);
+            InvalidateRect(window, nullptr, FALSE);
+        }
         if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE ||
             message == WM_SETTEXT || message == WM_UPDATEUISTATE || message == WM_LBUTTONDOWN ||
             message == WM_LBUTTONUP || message == BM_SETSTATE || message == BM_SETCHECK ||
             message == CB_SETCURSEL || message == CB_SHOWDROPDOWN ||
-            message == WM_DPICHANGED_AFTERPARENT)
+            message == WM_DPICHANGED_AFTERPARENT || message == WM_SHOWWINDOW ||
+            message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
+            RefreshAnimation(window, *state);
+            if (message == WM_CANCELMODE)
+                SettleAnimation(window, *state);
             InvalidateRect(window, nullptr, FALSE);
+        }
         if (state->Scrollbars &&
             (message == WM_NCPAINT || message == WM_VSCROLL || message == WM_HSCROLL ||
              message == WM_MOUSEWHEEL || message == WM_SIZE || message == WM_SETTEXT ||
@@ -683,6 +874,7 @@ void StyleButton(HWND window, ButtonKind kind) {
     auto *state = Get(window);
     state->Kind = ControlKind::Button;
     state->Button = kind;
+    RefreshAnimation(window, *state);
     SetWindowTheme(window, L"", L"");
     Repaint(window);
 }
@@ -691,12 +883,15 @@ void SetButtonSelected(HWND window, bool selected) {
         return;
     auto *state = Get(window);
     state->Selected = selected;
+    RefreshAnimation(window, *state);
     Repaint(window);
 }
 void StyleCheckBox(HWND window) {
     if (!window)
         return;
-    Get(window)->Kind = ControlKind::Check;
+    auto *state = Get(window);
+    state->Kind = ControlKind::Check;
+    RefreshAnimation(window, *state);
     SetWindowTheme(window, L"", L"");
     Repaint(window);
 }
@@ -712,6 +907,7 @@ void StyleComboBox(HWND window) {
         return;
     auto *state = Get(window);
     state->Kind = ControlKind::Combo;
+    RefreshAnimation(window, *state);
     const auto style = GetWindowLongPtrW(window, GWL_STYLE);
     SetWindowLongPtrW(window, GWL_STYLE, style | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
     SetWindowTheme(window, L"", L"");
@@ -729,6 +925,7 @@ void StyleEdit(HWND window) {
         return;
     auto *state = Get(window);
     state->Kind = ControlKind::Edit;
+    RefreshAnimation(window, *state);
     SetWindowLongPtrW(window, GWL_EXSTYLE, GetWindowLongPtrW(window, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
     SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) & ~WS_BORDER);
     SetWindowPos(window, nullptr, 0, 0, 0, 0,
@@ -745,6 +942,15 @@ void StyleScrollbars(HWND window) {
     state->Scrollbars = true;
     SetWindowTheme(window, L"", L"");
     PaintScrollbars(window, *state);
+}
+void SetAnimationsEnabled(HWND window, bool enabled) {
+    if (!window)
+        return;
+    auto *state = Get(window);
+    state->AnimationEnabled = enabled;
+    state->SystemMotion = SystemMotionAllowed();
+    RefreshAnimation(window, *state);
+    Repaint(window);
 }
 void SetDpi(HWND window, UINT dpi) {
     if (!window)

@@ -4,11 +4,14 @@
 #include "NativeWidgets.h"
 #include "ScriptPanel.h"
 #include "DriverSetup.h"
+#include "ControllerMonitorView.h"
+#include "ScriptLibraryPopup.h"
 #include "../Core/VisualDocument.h"
 #include "../Capture/Service.h"
 #include "../Capture/Bridge.h"
 #include "../ThirdParty/json.hpp"
 #include <CommCtrl.h>
+#include <Windowsx.h>
 #include <CommDlg.h>
 #include <Richedit.h>
 #include <Shellapi.h>
@@ -76,6 +79,7 @@ enum Id {
     UpStep,
     DownStep,
     MonitorAction = 140,
+    ScriptActions,
     Property = 1000
 };
 enum Field {
@@ -324,6 +328,7 @@ class MainWindow final {
     int scroll_ = 0, formHeight_ = 0;
     std::filesystem::path libraryDirectory_, currentPath_, draftPath_, consumedDraft_;
     std::string source_, saved_, active_, status_, error_, diagnostic_;
+    std::wstring inspectorState_;
     std::vector<std::filesystem::path> libraryFiles_;
     std::vector<Row> rows_;
     int row_ = -1, step_ = 0;
@@ -345,7 +350,10 @@ class MainWindow final {
     ServiceSnapshot snapshot_;
     std::function<int(const std::wstring &)> discardPrompt_;
     RECT editorRect_{};
-    int libraryWidth_ = 224, inspectorWidth_ = 280;
+    int workspaceRight_ = 650, inspectorWidth_ = 740;
+    double splitRatio_ = 0.47;
+    bool draggingSplit_ = false, popupOpen_ = false;
+    HDWP layoutBatch_ = nullptr;
     static LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
         MainWindow *self = reinterpret_cast<MainWindow *>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (message == WM_NCCREATE) {
@@ -442,13 +450,14 @@ class MainWindow final {
         if (style & (WS_VSCROLL | WS_HSCROLL))
             ui::StyleScrollbars(value);
         ui::SetDpi(value, dpi_);
+        ui::SetAnimationsEnabled(value, !reduced_);
         if (form_ && parent == form_)
             SetWindowSubclass(value, FieldProcedure, 2, reinterpret_cast<DWORD_PTR>(this));
         return value;
     }
     HWND Button(int id, const std::wstring &text, HWND parent = nullptr) {
         const auto button = Control(id, L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, parent);
-        ui::StyleButton(button, id == Inject ? ui::ButtonKind::Primary
+        ui::StyleButton(button, id == Inject || id == Library ? ui::ButtonKind::Primary
                                 : id == CodeTab || id == VisualTab || id == UseTab || id == EditTab
                                     ? ui::ButtonKind::Tab
                                     : ui::ButtonKind::Secondary);
@@ -456,7 +465,19 @@ class MainWindow final {
         return button;
     }
     void Place(HWND control, int x, int y, int width, int height) {
-        MoveWindow(control, S(x), S(y), std::max(1, S(width)), std::max(1, S(height)), TRUE);
+        if (layoutBatch_)
+            layoutBatch_ = DeferWindowPos(layoutBatch_, control, nullptr, S(x), S(y),
+                                         std::max(1, S(width)), std::max(1, S(height)),
+                                         SWP_NOZORDER | SWP_NOACTIVATE);
+        else
+            SetWindowPos(control, nullptr, S(x), S(y), std::max(1, S(width)),
+                         std::max(1, S(height)), SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    void ApplyMotionPreference() {
+        EnumChildWindows(window_, [](HWND child, LPARAM enabled) -> BOOL {
+            ui::SetAnimationsEnabled(child, enabled != 0);
+            return TRUE;
+        }, reduced_ ? 0 : 1);
     }
     void Fonts() {
         for (auto font : {font_, codeFont_, titleFont_, smallFont_, headingFont_})
@@ -470,7 +491,7 @@ class MainWindow final {
         smallFont_ = make(13, FW_NORMAL, L"Segoe UI");
         codeFont_ = make(14, FW_NORMAL, L"Consolas", FIXED_PITCH);
         headingFont_ = make(17, FW_SEMIBOLD, L"Segoe UI");
-        titleFont_ = make(23, FW_SEMIBOLD, L"Segoe UI");
+        titleFont_ = make(21, FW_SEMIBOLD, L"Segoe UI");
     }
     void Rich(HWND control, bool mono) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(mono ? codeFont_ : font_), TRUE);
@@ -489,7 +510,9 @@ class MainWindow final {
     }
     void CreateControls() {
         for (const auto &item :
-             std::vector<std::pair<int, std::wstring>>{{NewFile, L"+ New"},
+             std::vector<std::pair<int, std::wstring>>{{Library, L"\u2630  Scripts"},
+                                                       {ScriptActions, L"\u2026"},
+                                                       {NewFile, L"+ New"},
                                                        {OpenFile, L"Open…"},
                                                        {Folder, L"Open scripts folder"},
                                                        {Recover, L"Recover draft"},
@@ -513,9 +536,6 @@ class MainWindow final {
                                                        {AddConstant, L"+ Constant"},
                                                        {RemoveItem, L"Remove"}})
             controls_[item.first] = Button(item.first, item.second);
-        controls_[Library] = Control(Library, L"LISTBOX", L"",
-                                     LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS |
-                                         LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
         controls_[VisualList] = Control(VisualList, L"LISTBOX", L"",
                                         LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS |
                                             LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP);
@@ -530,12 +550,11 @@ class MainWindow final {
         SendMessageW(controls_[Code], EM_EXLIMITTEXT, 0, ScriptStorage::MaximumBytes);
         SendMessageW(controls_[Code], EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_SCROLL);
         SetWindowSubclass(controls_[Code], CodeProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
-        controls_[Monitor] =
-            Control(Monitor, MSFTEDIT_CLASS, L"",
-                    ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_HSCROLL | WS_VSCROLL | WS_TABSTOP);
-        Rich(controls_[Monitor], true);
-        SendMessageW(controls_[Monitor], EM_SETTARGETDEVICE, 0, 0);
-        SendMessageW(controls_[Monitor], EM_EXLIMITTEXT, 0, 4 * 1024 * 1024);
+        controls_[Monitor] = ui::CreateControllerMonitorView(window_, Monitor, instance_);
+        if (!controls_[Monitor])
+            throw std::runtime_error("The controller inspector could not be created.");
+        ui::StyleScrollbars(controls_[Monitor]);
+        ui::SetControllerMonitorDpi(controls_[Monitor], dpi_);
         form_ = CreateWindowExW(0, L"GprVisualForm", L"", WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0,
                                 1, 1, window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
         SetWindowLongPtrW(form_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -555,7 +574,8 @@ class MainWindow final {
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animation, 0);
         reduced_ = animation == FALSE;
         SendMessageW(controls_[Reduce], BM_SETCHECK, reduced_ ? BST_CHECKED : BST_UNCHECKED, 0);
-        ui::SetAccessibleName(controls_[Library], L"Script library");
+        ui::SetAccessibleName(controls_[Library], L"Open script library");
+        ui::SetAccessibleName(controls_[ScriptActions], L"Script and interface actions");
         ui::SetAccessibleName(controls_[VisualList], L"Visual rules, macros and constants");
         ui::SetAccessibleName(controls_[FindText], L"Find in script");
         ui::SetAccessibleName(controls_[Code], L"Script code");
@@ -566,12 +586,16 @@ class MainWindow final {
         EnableWindow(controls_[Stop], FALSE);
         ShowWindow(controls_[Recover], SW_HIDE);
         ShowWindow(controls_[MonitorAction], SW_HIDE);
+        ApplyMotionPreference();
     }
     void Visibility() {
+        for (int id : {NewFile, OpenFile, Folder, Recover, SaveAs, Reduce, Check})
+            ShowWindow(controls_[id], SW_HIDE);
         for (int id : {AddRule, AddMacro, Infinity, AddConstant, RemoveItem, VisualList})
             ShowWindow(controls_[id], !usage_ && visual_ ? SW_SHOW : SW_HIDE);
-        for (int id : {CodeTab, VisualTab, Check, FindText, FindNext, Save, SaveAs, Live})
+        for (int id : {CodeTab, VisualTab, FindText, FindNext, Live})
             ShowWindow(controls_[id], usage_ ? SW_HIDE : SW_SHOW);
+        ShowWindow(controls_[Save], SW_SHOW);
         ShowWindow(form_, !usage_ && visual_ ? SW_SHOW : SW_HIDE);
         ShowWindow(controls_[Code], !usage_ && !visual_ ? SW_SHOW : SW_HIDE);
         if (parameterPanel_)
@@ -581,82 +605,72 @@ class MainWindow final {
         ui::SetButtonSelected(controls_[EditTab], !usage_);
         ui::SetButtonSelected(controls_[CodeTab], !visual_);
         ui::SetButtonSelected(controls_[VisualTab], visual_);
-        InvalidateRect(window_, nullptr, FALSE);
+        ApplyMotionPreference();
+        Layout();
     }
     void Layout() {
         RECT r{};
         GetClientRect(window_, &r);
         const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
         const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
-        libraryWidth_ = width < 1100 ? 184 : 224;
-        inspectorWidth_ = width < 1300 ? 280 : 320;
-        const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
-        const int ew = er - ex, bottom = height - 32, contentBottom = bottom - 108;
-        editorRect_ = {S(ex), S(96), S(er), S(bottom)};
-        Place(controls_[Driver], width - 152, 24, 128, 36);
-        Place(controls_[Reduce], width - 304, 26, 140, 32);
-        ShowWindow(controls_[Reduce], width < 1000 ? SW_HIDE : SW_SHOW);
-        const int modeX = std::max(432, width / 2 - 120);
-        Place(controls_[UseTab], modeX, 24, 112, 36);
-        Place(controls_[EditTab], modeX + 120, 24, 112, 36);
-        const int half = (libraryWidth_ - 48) / 2;
-        Place(controls_[NewFile], 20, 144, half, 36);
-        Place(controls_[OpenFile], 28 + half, 144, half, 36);
-        Place(controls_[Library], 20, 196, libraryWidth_ - 40, std::max(80, bottom - 328));
-        Place(controls_[Recover], 20, bottom - 122, libraryWidth_ - 40, 36);
-        Place(controls_[Folder], 20, bottom - 76, libraryWidth_ - 40, 36);
-        Place(controls_[Save], er - 152, 104, 64, 36);
-        Place(controls_[SaveAs], er - 80, 104, 80, 36);
-        const bool narrowEditor = ew < 440;
-        Place(controls_[CodeTab], ex, 176, narrowEditor ? 64 : 80, 36);
-        Place(controls_[VisualTab], ex + (narrowEditor ? 72 : 88), 176,
-              narrowEditor ? 64 : 80, 36);
-        Place(controls_[Check], ex + (narrowEditor ? 144 : 184), 176,
-              narrowEditor ? 64 : 76, 36);
-        const int findWidth = narrowEditor ? 84 : ew < 500 ? 104 : 142;
-        const int findNextWidth = narrowEditor ? 50 : 58;
-        Place(controls_[FindText], er - findWidth - findNextWidth - 8, 176, findWidth, 36);
-        Place(controls_[FindNext], er - findNextWidth, 176, findNextWidth, 36);
-        Place(controls_[Code], ex, 232, ew, std::max(80, contentBottom - 232));
-        Place(controls_[ResetParameters], er - 140, 176, 140, 36);
+        workspaceRight_ = std::clamp(static_cast<int>(width * splitRatio_), 400,
+                                     std::max(400, width - 420));
+        inspectorWidth_ = width - workspaceRight_ - 12;
+        const int ex = 24, er = workspaceRight_, ew = er - ex;
+        const int bottom = height - 32, contentBottom = bottom - 128;
+        editorRect_ = {S(12), S(88), S(er + 12), S(bottom)};
+        layoutBatch_ = BeginDeferWindowPos(40);
+        Place(controls_[Library], 278, 20, 144, 38);
+        Place(controls_[Driver], width - 154, 20, 130, 38);
+        Place(controls_[ScriptActions], width - 208, 20, 42, 38);
+        Place(controls_[UseTab], ex, 104, 112, 36);
+        Place(controls_[EditTab], ex + 120, 104, 112, 36);
+        Place(controls_[Save], er - 72, 104, 72, 36);
+        const bool shortWindow = height < 620;
+        const int toolbarTop = shortWindow ? 184 : 224;
+        Place(controls_[CodeTab], ex, toolbarTop, 64, 34);
+        Place(controls_[VisualTab], ex + 72, toolbarTop, 64, 34);
+        const int searchWidth = ew - 216;
+        Place(controls_[FindText], ex + 148, toolbarTop, searchWidth, 34);
+        Place(controls_[FindNext], er - 56, toolbarTop, 56, 34);
+        const int contentTop = toolbarTop + 50;
+        Place(controls_[Code], ex, contentTop, ew, std::max(48, contentBottom - contentTop));
+        Place(controls_[ResetParameters], er - 140, toolbarTop, 140, 34);
         if (parameterPanel_)
-            Place(parameterPanel_->Handle(), ex, 232, ew, std::max(80, contentBottom - 232));
+            Place(parameterPanel_->Handle(), ex, contentTop, ew, std::max(32, contentBottom - contentTop));
+        int bx = ex;
+        const int visualTop = toolbarTop + 50;
+        for (const auto item : std::vector<std::pair<int, int>>{
+                 {AddRule, 54}, {AddMacro, 62}, {Infinity, 84}, {AddConstant, 80}}) {
+            Place(controls_[item.first], bx, visualTop, item.second, 34);
+            bx += item.second + 6;
+        }
+        SetText(controls_[Infinity], L"Infinity");
+        Place(controls_[RemoveItem], er - 64, visualTop, 64, 34);
+        const int listWidth = ew < 520 ? 108 : 136;
+        const int visualContentTop = visualTop + 48;
+        Place(controls_[VisualList], ex, visualContentTop, listWidth,
+              std::max(24, contentBottom - visualContentTop));
+        Place(form_, ex + listWidth + 12, visualContentTop, ew - listWidth - 12,
+              std::max(24, contentBottom - visualContentTop));
+        Place(controls_[Live], ex, bottom - 60, 126, 40);
+        Place(controls_[Stop], er - 244, bottom - 60, 76, 40);
+        Place(controls_[Inject], er - 156, bottom - 60, 156, 40);
+        const int rx = er + 24, right = width - 24;
+        const bool action = !demo_ && !snapshot_.Monitoring;
+        Place(controls_[Monitor], rx, 164, right - rx,
+              std::max(80, bottom - 72 - 164));
+        Place(controls_[MonitorAction], rx, bottom - 56, std::max(150, right - rx - 154), 36);
+        Place(controls_[Copy], action ? right - 142 : rx, bottom - 56,
+              action ? 142 : std::min(184, right - rx), 36);
+        if (layoutBatch_) {
+            EndDeferWindowPos(layoutBatch_);
+            layoutBatch_ = nullptr;
+        }
         RECT codeArea{};
         GetClientRect(controls_[Code], &codeArea);
-        InflateRect(&codeArea, -S(8), -S(10));
+        InflateRect(&codeArea, -S(12), -S(12));
         SendMessageW(controls_[Code], EM_SETRECT, 0, reinterpret_cast<LPARAM>(&codeArea));
-        int bx = ex;
-        for (const auto item :
-             (narrowEditor ? std::vector<std::pair<int, int>>{{AddRule, 56},
-                                                              {AddMacro, 62},
-                                                              {Infinity, 88},
-                                                              {AddConstant, 80}}
-              : ew < 520 ? std::vector<std::pair<int, int>>{{AddRule, 64},
-                                                          {AddMacro, 72},
-                                                          {Infinity, 104},
-                                                          {AddConstant, 86}}
-                       : std::vector<std::pair<int, int>>{
-                             {AddRule, 72}, {AddMacro, 82}, {Infinity, 116}, {AddConstant, 96}})) {
-            Place(controls_[item.first], bx, 232, item.second, 34);
-            bx += item.second + 8;
-        }
-        SetText(controls_[Infinity], narrowEditor ? L"Infinity" : L"Infinity recipe");
-        Place(controls_[RemoveItem], er - (narrowEditor ? 64 : 72), 232,
-              narrowEditor ? 64 : 72, 34);
-        const int listWidth = ew < 520 ? 112 : 128;
-        Place(controls_[VisualList], ex, 286, listWidth, std::max(40, contentBottom - 286));
-        Place(form_, ex + listWidth + 16, 286, ew - listWidth - 16, std::max(40, contentBottom - 286));
-        const int injectWidth = narrowEditor ? 150 : 180;
-        Place(controls_[Live], ex, bottom - 58, narrowEditor ? 120 : 148, 38);
-        Place(controls_[Stop], er - injectWidth - 88, bottom - 58, 80, 40);
-        Place(controls_[Inject], er - injectWidth, bottom - 58, injectWidth, 40);
-        const int rx = width - inspectorWidth_ + 24;
-        const int monitorTop = height < 600 ? 264 : height < 700 ? 304 : 376;
-        const bool monitorAction = !demo_ && !snapshot_.Monitoring;
-        Place(controls_[Monitor], rx, monitorTop, inspectorWidth_ - 48,
-              std::max(64, bottom - (monitorAction ? 110 : 64) - monitorTop));
-        Place(controls_[MonitorAction], rx, bottom - 106, inspectorWidth_ - 48, 38);
-        Place(controls_[Copy], rx, bottom - 60, inspectorWidth_ - 48, 38);
         if (!usage_ && visual_ && !formDirty_)
             BuildForm();
         InvalidateRect(window_, nullptr, FALSE);
@@ -686,105 +700,60 @@ class MainWindow final {
         Fill(dc, r, Background);
         const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
         const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
-        const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
-        const int rx = width - inspectorWidth_ + 24, bottom = height - 32;
+        const int ex = 24, er = workspaceRight_, rx = er + 24, bottom = height - 32;
         auto line = [&](int x1, int y1, int x2, int y2) {
             Fill(dc, {S(x1), S(y1), S(x2), S(y2)}, Edge);
         };
-        line(0, 84, width, 85);
-        line(libraryWidth_, 85, libraryWidth_ + 1, height - 28);
-        line(width - inspectorWidth_, 85, width - inspectorWidth_ + 1, height - 28);
-        line(0, height - 28, width, height - 27);
-        Fill(dc, {S(24), S(22), S(54), S(52)}, Accent, 8);
-        Draw(dc, L"G", {S(24), S(22), S(54), S(52)}, Ink, headingFont_,
+        line(24, 78, width - 24, 79);
+        line(er + 11, 104, er + 12, bottom - 16);
+        line(24, height - 30, width - 24, height - 29);
+        Fill(dc, {S(24), S(22), S(56), S(54)}, Accent, 10);
+        Draw(dc, L"G", {S(24), S(22), S(56), S(54)}, Ink, headingFont_,
              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        Draw(dc, L"GamePad Remapper", {S(66), S(16), S(430), S(46)}, Ink, titleFont_);
-        Draw(dc, L"Controller scripting, made simple", {S(66), S(49), S(460), S(70)}, Muted, smallFont_);
-        Draw(dc, L"Your scripts", {S(20), S(108), S(libraryWidth_ - 45), S(132)}, Ink, headingFont_);
-        Draw(dc, std::to_wstring(libraryFiles_.size()),
-             {S(libraryWidth_ - 44), S(111), S(libraryWidth_ - 20), S(132)}, Muted, smallFont_,
-             DT_RIGHT | DT_SINGLELINE);
-        Draw(dc, L"Local .igc files", {S(20), S(bottom - 27), S(libraryWidth_ - 20), S(bottom - 8)},
-             Muted, smallFont_);
-        std::wstring name = currentPath_.empty() ? L"Untitled script" : currentPath_.stem().wstring();
+        Draw(dc, L"GamePad Remapper", {S(68), S(18), S(268), S(45)}, Ink, headingFont_,
+             DT_SINGLELINE | DT_VCENTER);
+        Draw(dc, L"Remap. Script. Play.", {S(68), S(45), S(260), S(64)}, Muted, smallFont_,
+             DT_SINGLELINE);
+        std::wstring name = currentPath_.empty() ? (usage_ ? L"Choose a script to get started" : L"Untitled script")
+                                                : currentPath_.stem().wstring();
         if (source_ != saved_ || invalidVisual_)
             name += L"  *";
-        Draw(dc, name, {S(ex), S(106), S(er - 170), S(135)}, Ink, headingFont_,
-             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        const std::wstring state = demo_              ? L"Demo preview"
-                                   : active_.empty()  ? L"Not applied"
-                                   : ActiveSettings() ? L"Applied to your controller"
-                                                      : L"Changes waiting to apply";
-        Draw(dc, state, {S(ex), S(140), S(er), S(160)}, Muted, smallFont_,
-             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        line(ex, 220, er, 221);
+        const int titleTop = height < 620 ? 144 : 160;
+        Draw(dc, name, {S(ex), S(titleTop), S(er), S(titleTop + 30)}, Ink, titleFont_,
+             DT_SINGLELINE | DT_END_ELLIPSIS | DT_VCENTER);
+        const std::wstring state = demo_              ? L"SIMULATED PREVIEW - no controller access"
+                                   : active_.empty()  ? L"Adjust your settings, then apply"
+                                   : ActiveSettings() ? L"Script active on your controller"
+                                                      : L"New changes are ready to apply";
+        if (height >= 620)
+            Draw(dc, state, {S(ex), S(titleTop + 34), S(er), S(titleTop + 55)}, Muted, smallFont_,
+                 DT_SINGLELINE | DT_END_ELLIPSIS);
         if (usage_)
-            Draw(dc, L"Script parameters", {S(ex), S(180), S(er - 150), S(210)}, Ink, headingFont_);
-        const auto message = !error_.empty() ? L"!  " + Utf16(error_) : Utf16(status_);
-        Draw(dc, message, {S(ex), S(bottom - 96), S(er), S(bottom - 74)}, Ink, font_,
-             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, L"Live IN / OUT", {S(rx), S(108), S(width - 24), S(135)}, Ink, headingFont_);
-        const auto session = demo_               ? L"Preview"
-                             : snapshot_.Monitoring ? L"Observing"
-                             : monitorStarting_ ? L"Connecting"
-                             : monitorAccessRequired_ ? L"Access required"
-                                                      : L"Unavailable";
-        Fill(dc, {S(rx), S(157), S(rx + 7), S(164)},
-             demo_ || snapshot_.Monitoring ? Accent : Muted, 7);
-        Draw(dc, session, {S(rx + 18), S(147), S(width - 24), S(178)}, Ink, headingFont_);
-        Draw(dc,
-             demo_               ? L"Simulated controller"
-             : snapshot_.Running ? L"Your script is active"
-             : snapshot_.Monitoring ? L"No script - passthrough"
-                                    : L"Editor remains available",
-             {S(rx), S(height < 600 ? 184 : 188), S(width - 24), S(height < 600 ? 204 : 212)},
-             Muted, smallFont_);
-        const int countTop = height < 700 ? 208 : 250;
-        const int labelTop = height < 700 ? 242 : 290;
-        const int controllerTop = height < 600 ? 234 : height < 700 ? 274 : 346;
-        const int halfInspector = (inspectorWidth_ - 48) / 2;
-        if (height >= 700)
-            line(rx, 228, width - 24, 229);
-        if (height < 600)
-            Draw(dc, demo_ ? L"Preview frames"
-                          : std::to_wstring(snapshot_.MonitorFrames) + L" frames / " +
-                                std::to_wstring(snapshot_.MonitorDropped) + L" lost",
-                 {S(rx), S(208), S(width - 24), S(228)}, Muted, smallFont_,
-                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        else {
-            Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.MonitorFrames),
-                 {S(rx), S(countTop), S(rx + halfInspector), S(countTop + 34)}, Ink, titleFont_,
-                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.MonitorDropped),
-                 {S(rx + halfInspector + 8), S(countTop), S(width - 24), S(countTop + 34)}, Ink, titleFont_,
-                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            Draw(dc, L"Frames", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted,
-                 smallFont_);
-            Draw(dc, L"Lost", {S(rx + halfInspector + 8), S(labelTop), S(width - 24), S(labelTop + 20)},
-                 Muted, smallFont_);
-        }
-        line(rx, controllerTop - (height < 700 ? 8 : 18), width - 24,
-             controllerTop - (height < 700 ? 7 : 17));
-        Draw(dc, L"Controllers", {S(rx), S(controllerTop), S(width - 24), S(controllerTop + 22)}, Ink,
-             font_);
-        Draw(dc, demo_ ? L"1 preview" : std::to_wstring(snapshot_.Devices.size()),
-             {S(rx + 100), S(controllerTop + 1), S(width - 24), S(controllerTop + 23)}, Muted,
-             smallFont_, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, L"Ctrl+Enter Apply   /   Ctrl+S Save   /   Ctrl+F Find",
-             {S(20), S(height - 21), S(width - 256), S(height - 3)}, Muted, smallFont_,
-             DT_LEFT | DT_SINGLELINE);
+            Draw(dc, L"Script settings", {S(ex), S(height < 620 ? 188 : 228), S(er - 150), S(height < 620 ? 213 : 253)}, Ink, headingFont_,
+                 DT_SINGLELINE | DT_VCENTER);
+        line(ex, bottom - 116, er, bottom - 115);
+        const auto message = !error_.empty() ? Utf16(error_) : Utf16(status_);
+        Draw(dc, message, {S(ex), S(bottom - 104), S(er), S(bottom - 76)},
+             !error_.empty() ? Ink : Muted, smallFont_, DT_SINGLELINE | DT_END_ELLIPSIS | DT_VCENTER);
+        Draw(dc, L"Controller monitor", {S(rx), S(106), S(width - 24), S(133)}, Ink, headingFont_,
+             DT_SINGLELINE | DT_VCENTER);
+        const auto session = demo_ ? L"SIMULATED PREVIEW"
+                             : snapshot_.Monitoring ? (snapshot_.Running ? L"Live - script active" : L"Live - passthrough")
+                             : monitorStarting_ ? L"Connecting to the driver..."
+                             : monitorAccessRequired_ ? L"Enable live IN / OUT to connect"
+                                                      : L"Live monitor is unavailable";
+        Draw(dc, session, {S(rx), S(139), S(width - 24), S(158)}, Muted, smallFont_,
+             DT_SINGLELINE | DT_END_ELLIPSIS);
+        Draw(dc, L"Ctrl+Enter Apply  /  Ctrl+S Save  /  Ctrl+F Find",
+             {S(24), S(height - 22), S(width - 252), S(height - 4)}, Muted, smallFont_,
+             DT_SINGLELINE | DT_END_ELLIPSIS);
         Draw(dc, demo_ ? L"Preview - no driver access" : L"Driver demo: 2 hours per boot",
-             {S(width - 264), S(height - 21), S(width - 20), S(height - 3)}, Muted, smallFont_,
+             {S(width - 260), S(height - 22), S(width - 24), S(height - 4)}, Muted, smallFont_,
              DT_RIGHT | DT_SINGLELINE);
         if (busy_) {
-            RECT progress{S(ex), S(bottom - 7), S(er), S(bottom - 5)};
-            const int available = progress.right - progress.left;
-            const int tick = static_cast<int>((GetTickCount64() / 15) % 100);
-            const int x = reduced_ ? 0 : available * tick / 100;
-            Fill(dc,
-                 {progress.left + x, progress.top,
-                  std::min(progress.right, progress.left + x + available / 3), progress.bottom},
-                 Accent);
+            const int available = er - ex;
+            const int x = reduced_ ? 0 : available * static_cast<int>((GetTickCount64() / 14) % 100) / 100;
+            Fill(dc, {S(ex + x), S(bottom - 6), S(std::min(er, ex + x + available / 3)), S(bottom - 3)}, Accent, 3);
         }
     }
     void DrawItem(const DRAWITEMSTRUCT &item) {
@@ -799,13 +768,7 @@ class MainWindow final {
         name.right -= S(10);
         name.top += S(9);
         std::wstring heading, detail;
-        if (item.CtlID == Library && item.itemID < libraryFiles_.size()) {
-            heading = libraryFiles_[item.itemID].stem().wstring();
-            const auto prefix = heading.find(L" - ");
-            if (prefix == 2)
-                heading = heading.substr(5);
-            detail = L"IGC script";
-        } else if (item.CtlID == VisualList && item.itemID < rows_.size()) {
+        if (item.CtlID == VisualList && item.itemID < rows_.size()) {
             const auto row = rows_[item.itemID];
             if (row.Kind == RowKind::Rule) {
                 const auto &rule = document_->Rules[row.Index];
@@ -884,6 +847,7 @@ class MainWindow final {
                 parameterValues_[i] = found->second;
         }
         parameterPanel_->Set(schema, parameterValues_);
+        ApplyMotionPreference();
         EnableWindow(parameterPanel_->Handle(), !busy_);
         EnableWindow(controls_[ResetParameters], !busy_ && !schema.Parameters.empty());
     }
@@ -968,22 +932,74 @@ class MainWindow final {
                         std::filesystem::copy_file(file.path(), target);
                 }
         libraryFiles_.clear();
-        for (const auto &file : std::filesystem::directory_iterator(libraryDirectory_))
-            if (file.is_regular_file() && _wcsicmp(file.path().extension().c_str(), L".igc") == 0)
+        for (auto files = std::filesystem::recursive_directory_iterator(
+                 libraryDirectory_, std::filesystem::directory_options::skip_permission_denied);
+             files != std::filesystem::recursive_directory_iterator{}; ++files) {
+            const auto &file = *files;
+            if (file.is_directory()) {
+                const auto attributes = GetFileAttributesW(file.path().c_str());
+                const auto name = file.path().filename().wstring();
+                if ((!name.empty() && name.front() == L'.') ||
+                    (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)))
+                    files.disable_recursion_pending();
+            } else if (file.is_regular_file() && _wcsicmp(file.path().extension().c_str(), L".igc") == 0)
                 libraryFiles_.push_back(file.path());
+        }
         if (!currentPath_.empty() &&
             std::find(libraryFiles_.begin(), libraryFiles_.end(), currentPath_) == libraryFiles_.end())
             libraryFiles_.push_back(currentPath_);
         std::sort(libraryFiles_.begin(), libraryFiles_.end());
-        SendMessageW(controls_[Library], LB_RESETCONTENT, 0, 0);
-        for (std::size_t i = 0; i < libraryFiles_.size(); ++i) {
-            SendMessageW(controls_[Library], LB_ADDSTRING, 0,
-                         reinterpret_cast<LPARAM>(libraryFiles_[i].filename().c_str()));
-            if (libraryFiles_[i] == currentPath_)
-                SendMessageW(controls_[Library], LB_SETCURSEL, i, 0);
-        }
-        ShowWindow(controls_[Recover], RecoveryCandidate().empty() ? SW_HIDE : SW_SHOW);
+        SetText(controls_[Library], L"\u2630  Scripts");
     }
+    void ShowLibrary(bool actions = false) {
+        if (busy_ || popupOpen_)
+            return;
+        LoadLibrary();
+        std::vector<ui::ScriptLibraryEntry> entries;
+        std::vector<int> commands;
+        if (actions) {
+            for (const auto &item : std::vector<std::pair<int, std::wstring>>{
+                     {NewFile, L"New script    Ctrl+N"}, {OpenFile, L"Open file...    Ctrl+O"},
+                     {SaveAs, L"Save a copy..."}, {Folder, L"Open scripts folder"}}) {
+                entries.push_back({{}, item.second, L"Files"});
+                commands.push_back(item.first);
+            }
+            if (!RecoveryCandidate().empty()) {
+                entries.push_back({{}, L"Recover unsaved draft", L"Files"});
+                commands.push_back(Recover);
+            }
+            entries.push_back({{}, reduced_ ? L"Enable interface animations" : L"Reduce interface motion", L"View"});
+            commands.push_back(Reduce);
+        } else {
+            const auto examples = ExecutableDirectory() / L"Scripts";
+            for (const auto &file : libraryFiles_) {
+                auto label = file.stem().wstring();
+                if (label.size() > 5 && label[2] == L' ' && label[3] == L'-' && label[4] == L' ')
+                    label.erase(0, 5);
+                std::wstring group = std::filesystem::exists(examples / file.filename()) ? L"Examples" : L"My scripts";
+                if (file.parent_path() != libraryDirectory_)
+                    group = file.parent_path().lexically_relative(libraryDirectory_).generic_wstring();
+                entries.push_back({file, label, group});
+            }
+        }
+        popupOpen_ = true;
+        struct PopupGuard {
+            bool &Open;
+            ~PopupGuard() { Open = false; }
+        } guard{popupOpen_};
+        const auto selected = ui::ShowScriptLibraryPopup(window_, controls_[actions ? ScriptActions : Library],
+                                                         entries, currentPath_, actions ? L"Quick actions" : L"Scripts", !reduced_);
+        if (!selected || *selected >= entries.size())
+            return;
+        if (actions) {
+            const auto id = commands[*selected];
+            if (id == Reduce)
+                SendMessageW(controls_[Reduce], BM_SETCHECK, reduced_ ? BST_UNCHECKED : BST_CHECKED, 0);
+            Command(id, BN_CLICKED);
+        } else if (entries[*selected].Path != currentPath_ && Confirm())
+            Open(entries[*selected].Path);
+    }
+
     std::filesystem::path RecoveryCandidate() {
         auto dir = draftPath_.parent_path();
         if (!std::filesystem::exists(dir))
@@ -1864,7 +1880,7 @@ class MainWindow final {
                          !value && settingsProgram_ && settingsProgram_->Source() == source_);
         EnableWindow(controls_[ResetParameters],
                      !value && settingsProgram_ && settingsProgram_->Source() == source_);
-        for (int id : {Library, NewFile, OpenFile, Recover, Save, SaveAs, Inject, Check, AddRule,
+        for (int id : {Library, ScriptActions, NewFile, OpenFile, Recover, Save, SaveAs, Inject, Check, AddRule,
                        AddMacro, Infinity, AddConstant, RemoveItem, Live})
             EnableWindow(controls_[id], !value && !(demo_ && id == Inject));
         EnableWindow(controls_[Stop], snapshot_.Running && !value);
@@ -2064,14 +2080,7 @@ class MainWindow final {
             activePath_.clear();
         }
         EnableWindow(controls_[Stop], snapshot_.Running && !busy_);
-        // A slow health refresh is independent of event-driven input display.
-        SetTimer(window_, 1, 1000, nullptr);
         UpdateMonitor();
-        RECT area{};
-        GetClientRect(window_, &area);
-        area.left = area.right - S(inspectorWidth_);
-        area.top = S(85);
-        InvalidateRect(window_, &area, FALSE);
         if (wasActive != !active_.empty())
             InvalidateRect(window_, &editorRect_, FALSE);
     }
@@ -2130,10 +2139,6 @@ class MainWindow final {
         return output.str();
     }
     void UpdateMonitor() {
-        LARGE_INTEGER clock{};
-        if (snapshot_.MonitorTimestampFrequency)
-            QueryPerformanceCounter(&clock);
-        const auto now = static_cast<std::uint64_t>(clock.QuadPart);
         const bool action = !demo_ && !snapshot_.Monitoring;
         const bool wasAction = (GetWindowLongPtrW(controls_[MonitorAction], GWL_STYLE) & WS_VISIBLE) != 0;
         if (action != wasAction)
@@ -2142,8 +2147,26 @@ class MainWindow final {
                                          : monitorAccessRequired_ ? L"Enable live IN / OUT"
                                                                : L"Retry live IN / OUT");
         EnableWindow(controls_[MonitorAction], !busy_ && !monitorStarting_);
+        ui::UpdateControllerMonitorView(controls_[Monitor], snapshot_);
+        const std::wstring state = demo_ ? L"Preview" : snapshot_.Monitoring ? (snapshot_.Running ? L"Active" : L"Live")
+                                      : monitorStarting_ ? L"Connecting" : monitorAccessRequired_ ? L"Access" : L"Offline";
+        if (state != inspectorState_) {
+            inspectorState_ = state;
+            RECT area{};
+            GetClientRect(window_, &area);
+            area.left = S(workspaceRight_ + 24);
+            area.top = S(104);
+            area.bottom = S(160);
+            InvalidateRect(window_, &area, FALSE);
+        }
         if (action != wasAction)
             Layout();
+    }
+    void BuildDiagnostics() {
+        LARGE_INTEGER clock{};
+        if (snapshot_.MonitorTimestampFrequency)
+            QueryPerformanceCounter(&clock);
+        const auto now = static_cast<std::uint64_t>(clock.QuadPart);
         std::ostringstream diagnostic;
         diagnostic << "GamePad Remapper - native C++\n"
                    << (demo_ ? "SIMULATED PREVIEW - no driver or controller access"
@@ -2161,50 +2184,7 @@ class MainWindow final {
                    << snapshot_.Faults << " faults\n"
                    << std::fixed << std::setprecision(2) << snapshot_.ProcessingMicroseconds
                    << " us software processing\n\n";
-        std::ostringstream visible;
-        const auto prose = [this](const std::string &text) {
-            const auto columns = static_cast<std::size_t>(std::max(24, (inspectorWidth_ - 72) / 8));
-            std::istringstream lines(text);
-            std::ostringstream wrapped;
-            std::string line;
-            while (std::getline(lines, line)) {
-                while (line.size() > columns) {
-                    const auto split = line.find_last_of(' ', columns);
-                    if (split == std::string::npos || !split)
-                        break;
-                    wrapped << line.substr(0, split) << '\n';
-                    line.erase(0, split + 1);
-                }
-                wrapped << line << '\n';
-            }
-            return wrapped.str();
-        };
-        if (demo_ && snapshot_.Devices.empty())
-            visible
-                << "SIMULATED PREVIEW\nNo controller access\n\nLive IN / OUT appears automatically "
-                   "with the driver.\nNo script is required.";
-        else if (snapshot_.Devices.empty())
-            visible
-                << (monitorStarting_
-                        ? "Opening driver telemetry...\n\nThe editor remains available."
-                        : snapshot_.Monitoring
-                        ? "Waiting for driver reports...\n\nMove a controller or press a button.\n"
-                          "No script is required."
-                        : monitorAccessRequired_
-                              ? "Administrator access required\n\nEnable live IN / OUT to observe "
-                                "physical input and driver output.\n\nThe editor works without it."
-                              : "Live observation unavailable\n\nRetry, or use Driver setup to "
-                                "install the compatible driver.\n\nThe editor remains available.");
-        if (demo_ && !snapshot_.Devices.empty())
-            visible << "SIMULATED PREVIEW\nNo controller access\n\n";
-        if (!demo_ && !snapshot_.Monitoring && !snapshot_.Devices.empty())
-            visible << "Last measured states\nObserver is not active\n\n";
-        if (snapshot_.MonitorDropped)
-            visible << "\nTelemetry lost: " << snapshot_.MonitorDropped
-                    << " frames. Unknown values need a new report.\n\n";
         for (const auto &device : snapshot_.Devices) {
-            visible << device.Name << "\n"
-                    << Values(device, now, snapshot_.MonitorTimestampFrequency) << "\n\n";
             diagnostic << device.Name << "\n"
                        << device.Token << "\n"
                        << "Family " << device.Family << ", key " << device.Key
@@ -2236,12 +2216,6 @@ class MainWindow final {
                     << "Generic HID uses reported AXIS / BUTTON / VALUE controls; face aliases are "
                        "not guessed.\n\n";
         }
-        if (!error_.empty())
-            visible << "\nScript needs attention\n" << prose(error_);
-        if (!snapshot_.Error.empty())
-            visible << "\nScript connection details\n" << prose(snapshot_.Error);
-        if (!snapshot_.MonitorError.empty())
-            visible << "\nObserver details\n" << prose(snapshot_.MonitorError);
         diagnostic
             << "DIAGNOSTICS\n"
             << (!error_.empty() ? error_ : status_) << "\n"
@@ -2252,17 +2226,6 @@ class MainWindow final {
             << "OUT observes the report released by the driver, not whether each application read it.\n"
             << "Software timing excludes USB/controller/display latency.";
         diagnostic_ = diagnostic.str();
-        const auto text = Utf16(visible.str());
-        if (Text(controls_[Monitor]) != text) {
-            CHARRANGE selection{};
-            POINT position{};
-            SendMessageW(controls_[Monitor], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selection));
-            SendMessageW(controls_[Monitor], EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
-            SetWindowTextW(controls_[Monitor], text.c_str());
-            Rich(controls_[Monitor], true);
-            SendMessageW(controls_[Monitor], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&selection));
-            SendMessageW(controls_[Monitor], EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&position));
-        }
     }
     void Close() {
         if (closing_)
@@ -2334,24 +2297,16 @@ class MainWindow final {
                 SendMessageW(controls_[VisualList], LB_SETCURSEL, row_, 0);
             return;
         }
-        if (id == Library && event == LBN_SELCHANGE) {
-            const int selected = static_cast<int>(SendMessageW(controls_[Library], LB_GETCURSEL, 0, 0));
-            if (selected >= 0 && static_cast<std::size_t>(selected) < libraryFiles_.size() &&
-                Confirm()) {
-                const auto path = libraryFiles_[static_cast<std::size_t>(selected)];
-                try {
-                    Open(path);
-                } catch (...) {
-                    LoadLibrary();
-                    throw;
-                }
-            } else
-                LoadLibrary();
-            return;
-        }
+
         if (event != BN_CLICKED)
             return;
         switch (id) {
+        case Library:
+            ShowLibrary();
+            break;
+        case ScriptActions:
+            ShowLibrary(true);
+            break;
         case NewFile:
             if (!busy_ && Confirm()) {
                 RetireDrafts();
@@ -2401,6 +2356,7 @@ class MainWindow final {
                 settings_.clear();
                 parameterValues_ = settingsProgram_->Interface().Defaults();
                 parameterPanel_->Set(settingsProgram_->Interface(), parameterValues_);
+                ApplyMotionPreference();
                 ParametersChanged();
             }
             break;
@@ -2425,8 +2381,10 @@ class MainWindow final {
             break;
         case Reduce:
             reduced_ = SendMessageW(controls_[Reduce], BM_GETCHECK, 0, 0) == BST_CHECKED;
+            ApplyMotionPreference();
             break;
         case Copy:
+            BuildDiagnostics();
             Clipboard(window_, Utf16(diagnostic_));
             break;
         case MonitorAction:
@@ -2480,11 +2438,11 @@ class MainWindow final {
         for (const auto &item : controls_) {
             SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
             ui::SetDpi(item.second, dpi_);
-            if (item.first == Library || item.first == VisualList)
+            if (item.first == VisualList)
                 SendMessageW(item.second, LB_SETITEMHEIGHT, 0, S(60));
         }
         Rich(controls_[Code], true);
-        Rich(controls_[Monitor], true);
+        ui::SetControllerMonitorDpi(controls_[Monitor], dpi_);
         for (const auto &item : fields_) {
             SendMessageW(item.second, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
             ui::SetDpi(item.second, dpi_);
@@ -2494,6 +2452,7 @@ class MainWindow final {
         ui::SetDpi(form_, dpi_);
         if (parameterPanel_)
             parameterPanel_->SetDpi(dpi_);
+        ApplyMotionPreference();
         settingCode_ = wasSettingCode;
     }
     LRESULT Message(UINT message, WPARAM w, LPARAM l) {
@@ -2531,10 +2490,65 @@ class MainWindow final {
             return 0;
         case WM_ERASEBKGND:
             return 1;
+        case WM_SETTINGCHANGE:
+            EnumChildWindows(window_, [](HWND child, LPARAM) -> BOOL {
+                SendMessageW(child, WM_SETTINGCHANGE, 0, 0);
+                return TRUE;
+            }, 0);
+            ApplyMotionPreference();
+            return 0;
+        case WM_SETCURSOR: {
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(window_, &point);
+            if (LOWORD(l) == HTCLIENT && std::abs(point.x - S(workspaceRight_ + 12)) < S(7) && point.y > S(88)) {
+                SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
+            return DefWindowProcW(window_, message, w, l);
+        }
+        case WM_LBUTTONDOWN:
+            if (std::abs(GET_X_LPARAM(l) - S(workspaceRight_ + 12)) < S(7) && GET_Y_LPARAM(l) > S(88)) {
+                draggingSplit_ = true;
+                SetCapture(window_);
+                return 0;
+            }
+            return DefWindowProcW(window_, message, w, l);
+        case WM_MOUSEMOVE:
+            if (draggingSplit_) {
+                RECT area{};
+                GetClientRect(window_, &area);
+                splitRatio_ = std::clamp(static_cast<double>(GET_X_LPARAM(l) - S(12)) / std::max<LONG>(1, area.right), 0.30, 0.70);
+                Layout();
+            }
+            return 0;
+        case WM_LBUTTONUP:
+            if (draggingSplit_) {
+                draggingSplit_ = false;
+                ReleaseCapture();
+            }
+            return 0;
+        case WM_CAPTURECHANGED:
+            draggingSplit_ = false;
+            return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps{};
             HDC dc = BeginPaint(window_, &ps);
-            Paint(dc);
+            RECT area{};
+            GetClientRect(window_, &area);
+            HDC buffer = CreateCompatibleDC(dc);
+            HBITMAP bitmap = CreateCompatibleBitmap(dc, std::max<LONG>(1, area.right), std::max<LONG>(1, area.bottom));
+            if (buffer && bitmap) {
+                const auto previous = SelectObject(buffer, bitmap);
+                Paint(buffer);
+                BitBlt(dc, ps.rcPaint.left, ps.rcPaint.top,
+                       ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
+                       buffer, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+                SelectObject(buffer, previous);
+            } else
+                Paint(dc);
+            if (bitmap) DeleteObject(bitmap);
+            if (buffer) DeleteDC(buffer);
             EndPaint(window_, &ps);
             return 0;
         }
@@ -2821,6 +2835,7 @@ class MainWindow final {
         return GetComboBoxInfo(fields_.at(Activation), &combo) ? combo.hwndList : nullptr;
     }
     void HidePopup() { SendMessageW(fields_.at(Activation), CB_SHOWDROPDOWN, FALSE, 0); }
+    void LibraryPreview() { ShowLibrary(); }
     void MotionPreview() { ScrollTo(430); }
 
     void Preview(bool macro) {
@@ -2860,8 +2875,12 @@ class MainWindow final {
     }
     void UsagePreview() {
         const auto path = ExecutableDirectory() / L"Scripts" / L"10 - Custom Script Interface.igc";
-        if (std::filesystem::exists(path))
-            SetSource(ScriptStorage::Read(path), {}, false);
+        if (std::filesystem::exists(path)) {
+            const auto source = ScriptStorage::Read(path);
+            const auto previewPath = libraryDirectory_ / path.filename();
+            ScriptStorage::Write(previewPath, source, false);
+            SetSource(source, previewPath, false);
+        }
         ConfigureParameters(ScriptCompiler::Compile(source_));
         usage_ = true;
         Visibility();
@@ -2884,7 +2903,30 @@ class MainWindow final {
         device.Available[10] = device.OutputAvailable[10] = true;
         device.InputAvailable = device.Available;
         device.Values[10] = device.OutputValues[10] = 100;
-        snapshot_.Devices = {device};
+        device.Name = "Xbox One";
+        device.Key = 1;
+        device.Token = "preview:gip";
+        ServiceDevice xbox = device;
+        xbox.Name = "Xbox 360";
+        xbox.Family = 4;
+        xbox.Key = 2;
+        xbox.Token = "preview:xusb";
+        ServiceDevice hid = device;
+        hid.Name = "DualSense";
+        hid.Family = 3;
+        hid.Key = 3;
+        hid.Token = "preview:hid";
+        hid.Available.fill(false);
+        hid.InputAvailable.fill(false);
+        hid.OutputAvailable.fill(false);
+        for (std::size_t i = 96; i < 100; ++i) {
+            hid.Available[i] = hid.InputAvailable[i] = hid.OutputAvailable[i] = true;
+            hid.Values[i] = (static_cast<int>(i) - 98) * 10;
+            hid.OutputValues[i] = hid.Values[i];
+        }
+        for (std::size_t i = 32; i < 44; ++i)
+            hid.Available[i] = hid.InputAvailable[i] = hid.OutputAvailable[i] = true;
+        snapshot_.Devices = {device, xbox, hid};
         snapshot_.Running = true;
         snapshot_.Monitoring = true;
         UpdateMonitor();
@@ -2939,10 +2981,10 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     SendMessageW(controls_[Live], BM_SETCHECK, BST_UNCHECKED, 0);
     require(IsWindow(controls_[Code]) && IsWindow(controls_[Library]),
             "Native Windows code editor and library controls exist");
-    require(SendMessageW(controls_[Monitor], EM_GETLIMITTEXT, 0, 0) >= 4 * 1024 * 1024,
-            "The live monitor has room for every supported controller and all of its controls");
-    require((GetWindowLongPtrW(controls_[Monitor], GWL_STYLE) & ES_AUTOHSCROLL) != 0,
-            "Controller report rows cannot word-wrap OUT onto a separate visual line");
+    require(IsWindow(controls_[Monitor]) && ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0,
+            "The dedicated controller inspector starts without fabricating an input device");
+    require(Text(controls_[Library]).find(L"Scripts") != std::wstring::npos,
+            "The visible Scripts menu replaces the permanently open library sidebar");
     const std::string initial = "// Exact source must survive mode changes.\nmain {\n}\n";
     SetSource(initial, {}, false);
     EnterVisual();
@@ -3136,6 +3178,13 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(std::find(libraryFiles_.begin(), libraryFiles_.end(), upper) != libraryFiles_.end(),
             "The script library accepts uppercase Windows file extensions");
     std::filesystem::remove(upper);
+    const auto nestedScript = libraryDirectory_ / L"Racing" / L"Steering.igc";
+    std::filesystem::create_directories(nestedScript.parent_path());
+    ScriptStorage::Write(nestedScript, "main {}", false);
+    LoadLibrary();
+    require(std::find(libraryFiles_.begin(), libraryFiles_.end(), nestedScript) != libraryFiles_.end(),
+            "The script menu also discovers scripts organized into user folders");
+    std::filesystem::remove(nestedScript);
     LoadLibrary();
     const auto bad = directory / L"bad.igc";
     {
@@ -3219,12 +3268,20 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     snapshot_.MonitorStatus = "Read-only observer active";
     snapshot_.MonitorDropped = 7;
     UpdateMonitor();
-    require(Text(controls_[Monitor]).find(L"AXIS_64    -40%   30% *") != std::wstring::npos &&
+    BuildDiagnostics();
+    const auto presented = ui::InspectControllerMonitorView(controls_[Monitor]);
+    const auto axis = std::find_if(presented.Rows.begin(), presented.Rows.end(),
+                                   [](const ui::ControllerMonitorRow &row) { return row.Slot == 159; });
+    require(axis != presented.Rows.end() && axis->InputKnown && axis->OutputKnown && axis->Different &&
                 diagnostic_.find("Script: stopped") != std::string::npos &&
                 diagnostic_.find("7 lost frames") != std::string::npos &&
-                diagnostic_.find("timestamp=800") != std::string::npos &&
-                Text(controls_[Monitor]).find(L"Telemetry lost: 7") != std::wstring::npos,
-            "Stopping a script leaves independent IN/OUT visible with copied timestamp and loss diagnostics");
+                diagnostic_.find("timestamp=800") != std::string::npos,
+            "Stopping a script leaves graphical IN/OUT visible with complete copyable diagnostics");
+    const auto copiedDiagnostics = diagnostic_;
+    snapshot_.MonitorFrames += 1;
+    UpdateMonitor();
+    require(diagnostic_ == copiedDiagnostics,
+            "High-frequency input refreshes do not rebuild the full diagnostic text");
     device.Available.fill(false);
     device.InputAvailable.fill(false);
     device.OutputAvailable.fill(false);
@@ -3232,43 +3289,27 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     device.Values[32] = 100;
     device.OutputValues[32] = 0;
     device.Name = "HID-compliant game controller";
+    device.Token = "compact:hid";
+    device.Key = 2;
+    device.Family = 3;
     snapshot_.Devices = {device};
     UpdateMonitor();
-    bool singleReportLine = true;
-    std::ostringstream reportLineDetails;
+    bool stableColumns = true;
     for (const auto size : std::vector<POINT>{{1024, 768}, {910, 509}}) {
         ResizePreview(size.x, size.y);
-        const auto monitorText = Text(controls_[Monitor]);
-        const auto first = monitorText.find(L"BUTTON_1");
-        const auto end = monitorText.find_first_of(L"\r\n", first);
-        const auto rowText = first != std::wstring::npos && end != std::wstring::npos
-                                 ? monitorText.substr(first, end - first)
-                                 : std::wstring{};
-        FINDTEXTEXW found{};
-        found.chrg = {0, -1};
-        found.lpstrText = rowText.c_str();
-        const auto match = SendMessageW(controls_[Monitor], EM_FINDTEXTEXW, FR_DOWN,
-                                       reinterpret_cast<LPARAM>(&found));
-        const auto row = SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
-                                     found.chrgText.cpMin);
-        const auto rowFirst = SendMessageW(controls_[Monitor], EM_LINEINDEX, row, 0);
-        const auto rowNext = SendMessageW(controls_[Monitor], EM_LINEINDEX, row + 1, 0);
-        reportLineDetails << " " << size.x << ":" << found.chrgText.cpMin << ","
-                          << found.chrgText.cpMax << "," << row << ","
-                          << rowFirst << "," << rowNext << ","
-                          << SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
-                                          found.chrgText.cpMax - 1);
-        singleReportLine = singleReportLine && match >= 0 && !rowText.empty() &&
-                           rowText.find(L"ON   OFF *") != std::wstring::npos &&
-                           SendMessageW(controls_[Monitor], EM_GETLINECOUNT, 0, 0) > row &&
-                           rowFirst == found.chrgText.cpMin &&
-                           rowNext >= found.chrgText.cpMax &&
-                           SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
-                                        found.chrgText.cpMax - 1) == row;
+        const auto before = ui::InspectControllerMonitorView(controls_[Monitor]);
+        snapshot_.Devices[0].Values[32] = 0;
+        UpdateMonitor();
+        const auto after = ui::InspectControllerMonitorView(controls_[Monitor]);
+        stableColumns = stableColumns && before.Rows.size() == 1 && after.Rows.size() == 1 &&
+                        EqualRect(&before.Rows[0].Bounds, &after.Rows[0].Bounds) &&
+                        before.LayoutRevision == after.LayoutRevision &&
+                        before.Rows[0].InputText != after.Rows[0].InputText;
+        snapshot_.Devices[0].Values[32] = 100;
+        UpdateMonitor();
     }
-    require(singleReportLine,
-            "At 1024 pixels and the minimum desktop, BUTTON_1 IN and OUT occupy one actual RichEdit visual line" +
-                (singleReportLine ? std::string{} : reportLineDetails.str()));
+    require(stableColumns,
+            "IN/OUT stay on fixed visual rows without moving or reflowing when values change at compact sizes");
     ResizePreview(1440, 930);
     snapshot_ = {};
     discardPrompt_ = nullptr;
@@ -3294,20 +3335,13 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(scroll_ > 0 && focused.top >= 0 && focused.bottom <= viewport.bottom,
             "Keyboard focus reveals offscreen properties in the scrolling visual editor");
     ScrollTo(0);
-    std::wstring libraryLabel(
-        static_cast<std::size_t>(SendMessageW(controls_[Library], LB_GETTEXTLEN, 0, 0)) + 1, L'\0');
-    SendMessageW(controls_[Library], LB_GETTEXT, 0, reinterpret_cast<LPARAM>(libraryLabel.data()));
-    libraryLabel.resize(wcslen(libraryLabel.c_str()));
-    require(!libraryFiles_.empty() && libraryLabel == libraryFiles_.front().filename().wstring(),
-            "Owner-drawn script rows retain real strings for accessibility and keyboard search");
-    CHARRANGE marked{0, 7};
-    SendMessageW(controls_[Monitor], EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&marked));
+    require(!libraryFiles_.empty() && Text(controls_[Library]).find(L"Scripts") != std::wstring::npos,
+            "The script menu retains a visible accessible label while the library is collapsed");
     error_ = "Detailed compiler information";
     UpdateMonitor();
-    CHARRANGE retained{};
-    SendMessageW(controls_[Monitor], EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&retained));
-    require(retained.cpMin == marked.cpMin && retained.cpMax == marked.cpMax,
-            "Live detail updates preserve the reader's text selection");
+    BuildDiagnostics();
+    require(diagnostic_.find(error_) != std::string::npos,
+            "Full compiler information remains available without rewriting the live controller display");
     error_.clear();
     // Published observer states can be exercised without constructing a service.
     demo_ = false;
@@ -3317,7 +3351,7 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     Command(MonitorAction, BN_CLICKED);
     require(!service_ && workspaceVisible(controls_[MonitorAction]) &&
                 Text(controls_[MonitorAction]) == L"Enable live IN / OUT" &&
-                Text(controls_[Monitor]).find(L"Administrator access required") != std::wstring::npos &&
+                ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
                 IsWindowEnabled(controls_[Code]),
             "The editor remains usable while one explicit action requests observer access");
     monitorStarting_ = true;
@@ -3330,8 +3364,9 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     monitorAccessRequired_ = false;
     snapshot_.MonitorError = "Driver query failed: Windows error 2; compatible driver not installed.";
     UpdateMonitor();
+    BuildDiagnostics();
     require(Text(controls_[MonitorAction]) == L"Retry live IN / OUT" &&
-                Text(controls_[Monitor]).find(L"Observer details") != std::wstring::npos &&
+                ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
                 diagnostic_.find("Windows error 2") != std::string::npos &&
                 diagnostic_.find("compatible driver not installed") != std::string::npos,
             "An unavailable observer exposes the exact error, retry and existing Driver setup action");
@@ -3416,7 +3451,7 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     Command(UseTab, BN_CLICKED);
     const bool usageVisible = usage_ && workspaceVisible(parameterPanel_->Handle()) &&
                               !workspaceVisible(controls_[Code]) && !workspaceVisible(form_) &&
-                              !workspaceVisible(controls_[Save]) && !workspaceVisible(controls_[Live]);
+                              workspaceVisible(controls_[Save]) && !workspaceVisible(controls_[Live]);
     std::string usageFailure;
     if (!usageVisible) {
         std::ostringstream detail;
@@ -3438,7 +3473,7 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
         usageFailure = detail.str();
     }
     require(usageVisible,
-            "Use script shows custom settings and session actions without authoring controls" +
+            "Use script shows custom settings, Save and session actions without editor controls" +
                 usageFailure);
     auto panel = parameterPanel_->Handle();
     auto slider = GetDlgItem(panel, ScriptPanel::FirstInput);
@@ -3667,6 +3702,59 @@ void Screenshot(HWND window, const std::filesystem::path &path, HWND popup = nul
     if (FAILED(result))
         throw std::runtime_error("The native UI screenshot could not be encoded.");
 }
+void ScreenshotLibrary(MainWindow &window, const std::filesystem::path &path) {
+    struct Capture {
+        std::filesystem::path Path;
+        std::exception_ptr Error;
+        bool Captured = false;
+    } capture{path, {}, false};
+    constexpr wchar_t property[] = L"GprLibraryScreenshot";
+    SetPropW(window.Handle(), property, &capture);
+    const auto timer = SetTimer(window.Handle(), 0x475052, 260,
+        [](HWND owner, UINT, UINT_PTR id, DWORD) {
+            KillTimer(owner, id);
+            auto *request = static_cast<Capture *>(GetPropW(owner, L"GprLibraryScreenshot"));
+            if (!request)
+                return;
+            struct Find { HWND Owner; HWND Popup; } find{owner, nullptr};
+            EnumThreadWindows(GetCurrentThreadId(), [](HWND candidate, LPARAM data) -> BOOL {
+                auto &result = *reinterpret_cast<Find *>(data);
+                wchar_t name[80]{};
+                GetClassNameW(candidate, name, 80);
+                if (wcscmp(name, L"GprScriptLibraryPopup") == 0 &&
+                    GetWindow(candidate, GW_OWNER) == result.Owner) {
+                    result.Popup = candidate;
+                    return FALSE;
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&find));
+            try {
+                if (!find.Popup)
+                    throw std::runtime_error("The script menu was not available for rendering.");
+                Screenshot(owner, request->Path, find.Popup);
+                request->Captured = true;
+            } catch (...) { request->Error = std::current_exception(); }
+            if (find.Popup)
+                PostMessageW(find.Popup, WM_CLOSE, 0, 0);
+        });
+    if (!timer) {
+        RemovePropW(window.Handle(), property);
+        throw std::runtime_error("The script menu render could not be scheduled.");
+    }
+    try {
+        window.LibraryPreview();
+    } catch (...) {
+        KillTimer(window.Handle(), timer);
+        RemovePropW(window.Handle(), property);
+        throw;
+    }
+    KillTimer(window.Handle(), timer);
+    RemovePropW(window.Handle(), property);
+    if (capture.Error)
+        std::rethrow_exception(capture.Error);
+    if (!capture.Captured)
+        throw std::runtime_error("The script menu render did not complete.");
+}
 } // namespace
 
 int RunApplication(HINSTANCE instance, int show, const std::vector<std::wstring> &arguments) {
@@ -3738,6 +3826,7 @@ int RunUiTests(const std::wstring &report, const std::wstring &renderDirectory) 
             window.MonitorPreview();
             Screenshot(window.Handle(), destination / L"script-settings.png");
             Screenshot(window.Handle(), destination / L"controller-states.png");
+            ScreenshotLibrary(window, destination / L"script-library.png");
             window.Preview(false);
             window.CodePreview();
             Screenshot(window.Handle(), destination / L"code-editor.png");

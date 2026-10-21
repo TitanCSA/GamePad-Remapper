@@ -10,6 +10,7 @@
 
 namespace gpr {
 namespace {
+constexpr int FirstToggleLabel = 6200;
 LRESULT CALLBACK RevealOnFocus(HWND window, UINT message, WPARAM a, LPARAM b, UINT_PTR, DWORD_PTR) {
     if (message == WM_SETFOCUS)
         SendMessageW(GetParent(window), WM_APP + 1, 0, reinterpret_cast<LPARAM>(window));
@@ -64,19 +65,34 @@ ScriptPanel::~ScriptPanel() {
         DeleteObject(background_);
 }
 void ScriptPanel::SetDpi(UINT dpi) {
-    dpi_ = dpi ? dpi : 96;
-    if (font_)
-        DeleteObject(font_);
-    if (heading_)
-        DeleteObject(heading_);
+    dpi = dpi >= 72 && dpi <= 768 ? dpi : 96;
+    if (dpi_ == dpi && font_ && heading_)
+        return;
+    dpi_ = dpi;
     const auto make = [&](int size, int weight) {
         return CreateFontW(-MulDiv(size, static_cast<int>(dpi_), 96), 0, 0, 0, weight, FALSE, FALSE,
                            FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                            CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     };
-    font_ = make(15, FW_NORMAL);
-    heading_ = make(20, FW_SEMIBOLD);
-    Rebuild();
+    const auto body = make(14, FW_NORMAL), heading = make(20, FW_SEMIBOLD);
+    if (!body || !heading) {
+        if (body) DeleteObject(body);
+        if (heading) DeleteObject(heading);
+        throw std::runtime_error("Could not create the script parameter fonts.");
+    }
+    const auto previousBody = font_, previousHeading = heading_;
+    font_ = body;
+    heading_ = heading;
+    for (auto child : children_) {
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font_), FALSE);
+        ui::SetDpi(child, dpi_);
+    }
+    for (const auto &row : rows_)
+        if (row.Heading)
+            SendMessageW(row.Window, WM_SETFONT, reinterpret_cast<WPARAM>(heading_), FALSE);
+    if (previousBody) DeleteObject(previousBody);
+    if (previousHeading) DeleteObject(previousHeading);
+    Layout();
 }
 void ScriptPanel::Set(const ScriptInterface &schema, const ParameterValues &values) {
     schema.Validate(values);
@@ -92,11 +108,9 @@ void ScriptPanel::Rebuild() {
     children_.clear();
     inputs_.clear();
     readouts_.clear();
-    tops_.clear();
-    heights_.clear();
-    int y = 12;
+    rows_.clear();
     const auto create = [&](const wchar_t *kind, const std::wstring &text, DWORD style, int id,
-                            int height, bool heading = false) {
+                            int height, bool heading = false, bool wrap = false) {
         HWND child = CreateWindowExW(0, kind, text.c_str(), WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1,
                                      window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
                                      GetModuleHandleW(nullptr), nullptr);
@@ -104,42 +118,45 @@ void ScriptPanel::Rebuild() {
             throw std::runtime_error("Could not create a script interface control.");
         SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(heading ? heading_ : font_), FALSE);
         children_.push_back(child);
-        tops_.push_back(y);
-        heights_.push_back(height);
-        y += height + 8;
+        rows_.push_back({child, nullptr, RowKind::Normal, height, 0, 6, wrap, heading});
         ui::SetDpi(child, dpi_);
         return child;
     };
-    create(L"STATIC", Utf16(schema_.Title.empty() ? "Script settings" : schema_.Title), SS_LEFT, 0, 32,
-           true);
+    create(L"STATIC", Utf16(schema_.Title.empty() ? "Script settings" : schema_.Title),
+           SS_LEFT | SS_NOPREFIX, 0, 26, true, true);
     if (!schema_.Description.empty())
-        create(L"STATIC", Utf16(schema_.Description), SS_LEFT, 0, 44);
+        create(L"STATIC", Utf16(schema_.Description), SS_LEFT | SS_NOPREFIX, 0, 0, false, true);
     if (schema_.Parameters.empty())
         create(L"STATIC",
                L"This script has no custom settings.\nUse Edit script to add a ui block, or apply it "
                L"with its existing behavior.",
-               SS_LEFT, 0, 80);
+               SS_LEFT | SS_NOPREFIX, 0, 0, false, true);
     std::string group;
     for (std::size_t i = 0; i < schema_.Parameters.size(); ++i) {
         const auto &p = schema_.Parameters[i];
         if (p.Group != group) {
             group = p.Group;
             if (!group.empty()) {
-                y += 12;
-                create(L"STATIC", Utf16(group), SS_LEFT, 0, 24, true);
+                create(L"STATIC", Utf16(group), SS_LEFT | SS_NOPREFIX, 0, 26, true, true);
+                rows_.back().Before = 8;
             }
         }
-        const int labelTop = y;
         if (p.Kind != ParameterKind::Toggle)
-            create(L"STATIC", Utf16(p.Label), SS_LEFT, 0, 26);
+            create(L"STATIC", Utf16(p.Label), SS_LEFT | SS_NOPREFIX, 0, 20, false, true);
         HWND input = nullptr, readout = nullptr;
         const int id = FirstInput + static_cast<int>(i);
         if (p.Kind == ParameterKind::Toggle) {
-            input = create(L"BUTTON", Utf16(p.Label), BS_AUTOCHECKBOX | WS_TABSTOP, id, 36);
+            input = create(L"BUTTON", L"", BS_AUTOCHECKBOX | WS_TABSTOP, id, 32);
+            const auto row = rows_.size() - 1;
             ui::StyleToggle(input);
             SendMessageW(input, BM_SETCHECK, values_[i] ? BST_CHECKED : BST_UNCHECKED, 0);
+            const auto label = create(L"STATIC", Utf16(p.Label), SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
+                                       FirstToggleLabel + static_cast<int>(i), 0, false, true);
+            rows_.pop_back();
+            rows_[row].Kind = RowKind::Toggle;
+            rows_[row].Trailing = label;
         } else if (p.Kind == ParameterKind::Select) {
-            input = create(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, id, 38);
+            input = create(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, id, 32);
             ui::StyleComboBox(input);
             for (std::size_t c = 0; c < p.Choices.size(); ++c) {
                 SendMessageW(input, CB_ADDSTRING, 0,
@@ -148,65 +165,143 @@ void ScriptPanel::Rebuild() {
                     SendMessageW(input, CB_SETCURSEL, c, 0);
             }
         } else if (p.Kind == ParameterKind::Slider) {
-            readout = create(L"STATIC", Utf16(std::to_string(values_[i]) + p.Unit), SS_RIGHT, 0, 24);
-            tops_.back() = labelTop;
-            y -= 32;
-            input = create(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, id, 38);
+            const auto row = rows_.size() - 1;
+            readout = create(L"STATIC", Utf16(std::to_string(values_[i]) + p.Unit),
+                             SS_RIGHT | SS_NOPREFIX, 0, 20, false, true);
+            rows_.pop_back();
+            rows_[row].Kind = RowKind::SliderHeading;
+            rows_[row].Trailing = readout;
+            rows_[row].After = 2;
+            input = create(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, id, 32);
             SendMessageW(input, TBM_SETRANGEMIN, FALSE, 0);
             SendMessageW(input, TBM_SETRANGEMAX, FALSE, Steps(p));
             SendMessageW(input, TBM_SETPOS, TRUE, Position(p, values_[i]));
         } else {
             input = create(L"EDIT", std::to_wstring(values_[i]), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP,
-                           id, 36);
+                           id, 32);
             ui::StyleEdit(input);
             SendMessageW(input, EM_SETLIMITTEXT, 12, 0);
             readout = create(L"STATIC",
                              Utf16(std::to_string(p.Minimum) + " .. " + std::to_string(p.Maximum) +
                                    p.Unit + " | step " + std::to_string(p.Step)),
-                             SS_LEFT, 0, 28);
+                             SS_LEFT | SS_NOPREFIX, 0, 0, false, true);
         }
         ui::SetAccessibleName(input, Utf16(p.Label).c_str());
         SetWindowSubclass(input, RevealOnFocus, 1, 0);
         inputs_.push_back(input);
         readouts_.push_back(readout);
         if (!p.Help.empty())
-            create(L"STATIC", Utf16(p.Help), SS_LEFT, 0, 36);
-        y += 12;
+            create(L"STATIC", Utf16(p.Help), SS_LEFT | SS_NOPREFIX, 0, 0, false, true);
+        rows_.back().After = 10;
     }
-    contentHeight_ = y;
     building_ = false;
     Layout();
 }
 void ScriptPanel::Layout() {
+    if (layingOut_ || building_ || !window_)
+        return;
+    struct Guard {
+        bool &Flag;
+        explicit Guard(bool &flag) : Flag(flag) { Flag = true; }
+        ~Guard() { Flag = false; }
+    } guard(layingOut_);
+    const auto s = [&](int value) { return MulDiv(value, static_cast<int>(dpi_), 96); };
+    const auto logical = [&](int pixels) {
+        return static_cast<int>((static_cast<long long>(std::max(0, pixels)) * 96 + dpi_ - 1) / dpi_);
+    };
+    struct DeviceContext {
+        HWND Window;
+        HDC Value;
+        explicit DeviceContext(HWND window) : Window(window), Value(GetDC(window)) {}
+        ~DeviceContext() { if (Value) ReleaseDC(Window, Value); }
+    } dc(window_);
+    const auto text = [](HWND child) {
+        const int length = std::clamp(GetWindowTextLengthW(child), 0, 32768);
+        std::wstring result(static_cast<std::size_t>(length) + 1, L'\0');
+        result.resize(static_cast<std::size_t>(GetWindowTextW(child, result.data(), length + 1)));
+        return result;
+    };
+    const auto measure = [&](HWND child, int width, bool wrap) -> int {
+        if (!dc.Value)
+            return s(20);
+        const auto font = reinterpret_cast<HFONT>(SendMessageW(child, WM_GETFONT, 0, 0));
+        const auto previous = font ? SelectObject(dc.Value, font) : nullptr;
+        RECT measured{0, 0, std::max(1, width), 0};
+        auto caption = text(child);
+        DrawTextW(dc.Value, caption.data(), static_cast<int>(caption.size()), &measured,
+                  DT_CALCRECT | DT_NOPREFIX | (wrap ? DT_WORDBREAK | DT_EDITCONTROL : DT_SINGLELINE));
+        if (font)
+            SelectObject(dc.Value, previous);
+        return wrap ? measured.bottom - measured.top + s(2) : measured.right - measured.left;
+    };
+    struct Placement { HWND Window; int X, Y, Width, Height; };
+    std::vector<Placement> placements;
     RECT r{};
-    GetClientRect(window_, &r);
-    const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
-    scroll_ = std::clamp(scroll_, 0, std::max(0, contentHeight_ - height));
-    SCROLLINFO info{sizeof(info), SIF_RANGE | SIF_PAGE | SIF_POS};
-    info.nMax = std::max(0, contentHeight_ - 1);
-    info.nPage = static_cast<UINT>(std::max(1, height));
-    info.nPos = scroll_;
-    SetScrollInfo(window_, SB_VERT, &info, TRUE);
-    for (std::size_t i = 0; i < children_.size(); ++i) {
-        wchar_t type[32]{};
-        GetClassNameW(children_[i], type, 32);
-        const int h = _wcsicmp(L"COMBOBOX", type) == 0 ? 280 : heights_[i];
-        bool readout = false, sliderLabel = false;
-        for (std::size_t p = 0; p < readouts_.size(); ++p)
-            if (schema_.Parameters[p].Kind == ParameterKind::Slider) {
-                readout |= children_[i] == readouts_[p];
-                sliderLabel |= i + 1 < children_.size() && children_[i + 1] == readouts_[p];
+    // Showing/hiding the real native scrollbar changes the text width. Settle
+    // that width before placing children; resizing never recreates a control.
+    for (int pass = 0; pass < 3; ++pass) {
+        GetClientRect(window_, &r);
+        const int pad = s(12), full = std::max(1, static_cast<int>(r.right) - pad * 2);
+        int y = 10;
+        placements.clear();
+        for (const auto &row : rows_) {
+            y += row.Before;
+            int rowHeight = row.Height;
+            if (row.Kind == RowKind::SliderHeading) {
+                int reserved = measure(row.Trailing, full, false) + s(8);
+                for (std::size_t i = 0; i < readouts_.size(); ++i)
+                    if (readouts_[i] == row.Trailing && dc.Value) {
+                        const auto &parameter = schema_.Parameters[i];
+                        const auto font = reinterpret_cast<HFONT>(SendMessageW(row.Trailing, WM_GETFONT, 0, 0));
+                        const auto previous = font ? SelectObject(dc.Value, font) : nullptr;
+                        for (const int bound : {parameter.Minimum, parameter.Maximum}) {
+                            const auto caption = Utf16(std::to_string(bound) + parameter.Unit);
+                            SIZE size{};
+                            GetTextExtentPoint32W(dc.Value, caption.c_str(), static_cast<int>(caption.size()), &size);
+                            reserved = std::max(reserved, static_cast<int>(size.cx) + s(8));
+                        }
+                        if (font) SelectObject(dc.Value, previous);
+                        break;
+                    }
+                reserved = std::min(std::max(s(40), reserved), std::max(1, full / 2));
+                const int labelWidth = std::max(1, full - reserved - s(8));
+                rowHeight = std::max(rowHeight, logical(std::max(measure(row.Window, labelWidth, true),
+                                                               measure(row.Trailing, reserved, true))));
+                placements.push_back({row.Window, pad, y, labelWidth, s(rowHeight)});
+                placements.push_back({row.Trailing, pad + full - reserved, y, reserved, s(rowHeight)});
+            } else if (row.Kind == RowKind::Toggle) {
+                const int gap = s(56), labelWidth = std::max(1, full - gap);
+                const int labelHeight = logical(measure(row.Trailing, labelWidth, true));
+                rowHeight = std::max(rowHeight, labelHeight);
+                placements.push_back({row.Window, pad, y + (rowHeight - 32) / 2, s(48), s(32)});
+                placements.push_back({row.Trailing, pad + gap, y + (rowHeight - labelHeight) / 2,
+                                      labelWidth, s(labelHeight)});
+            } else {
+                if (row.Wrap)
+                    rowHeight = std::max(rowHeight, logical(measure(row.Window, full, true)));
+                wchar_t type[32]{};
+                GetClassNameW(row.Window, type, 32);
+                placements.push_back({row.Window, pad, y, full,
+                                      s(_wcsicmp(L"COMBOBOX", type) == 0 ? 280 : rowHeight)});
             }
-        const int pad = MulDiv(12, static_cast<int>(dpi_), 96),
-                  extra = MulDiv(120, static_cast<int>(dpi_), 96);
-        const int full = static_cast<int>(r.right) - MulDiv(40, static_cast<int>(dpi_), 96);
-        MoveWindow(children_[i], readout ? pad + full - extra : pad,
-                   MulDiv(tops_[i] - scroll_, static_cast<int>(dpi_), 96),
-                   std::max(1, readout       ? extra
-                               : sliderLabel ? full - extra
-                                             : full),
-                   MulDiv(h, static_cast<int>(dpi_), 96), TRUE);
+            y += rowHeight + row.After;
+        }
+        contentHeight_ = y + 4;
+        const int height = logical(r.bottom);
+        scroll_ = std::clamp(scroll_, 0, std::max(0, contentHeight_ - height));
+        SCROLLINFO info{sizeof(info), SIF_RANGE | SIF_PAGE | SIF_POS};
+        info.nMax = std::max(0, contentHeight_ - 1);
+        info.nPage = static_cast<UINT>(std::max(1, height));
+        info.nPos = scroll_;
+        SetScrollInfo(window_, SB_VERT, &info, TRUE);
+        RECT settled{};
+        GetClientRect(window_, &settled);
+        if (settled.right == r.right)
+            break;
     }
+    for (const auto &placement : placements)
+        MoveWindow(placement.Window, placement.X, s(placement.Y - scroll_), placement.Width,
+                   placement.Height, TRUE);
     InvalidateRect(window_, nullptr, FALSE);
 }
 void ScriptPanel::Scroll(int position) {
@@ -345,6 +440,12 @@ LRESULT ScriptPanel::Message(UINT message, WPARAM a, LPARAM b) {
         return 0;
     }
     case WM_COMMAND: {
+        const auto label = static_cast<int>(LOWORD(a)) - FirstToggleLabel;
+        if (!building_ && label >= 0 && static_cast<std::size_t>(label) < inputs_.size() &&
+            schema_.Parameters[label].Kind == ParameterKind::Toggle && HIWORD(a) == STN_CLICKED) {
+            SendMessageW(inputs_[label], BM_CLICK, 0, 0);
+            return 0;
+        }
         const auto id = LOWORD(a) - FirstInput;
         if (building_ || id < 0 || static_cast<std::size_t>(id) >= inputs_.size())
             return 0;
@@ -370,6 +471,7 @@ LRESULT ScriptPanel::Message(UINT message, WPARAM a, LPARAM b) {
                 Utf16(valid ? std::to_string(p.Minimum) + " .. " + std::to_string(p.Maximum) + p.Unit
                             : "Enter a value in range with step " + std::to_string(p.Step))
                     .c_str());
+            Layout();
             if (valid)
                 Changed(id, value);
         }
@@ -395,6 +497,12 @@ LRESULT ScriptPanel::Message(UINT message, WPARAM a, LPARAM b) {
         case SB_THUMBTRACK:
             pos = info.nTrackPos;
             break;
+        case SB_THUMBPOSITION: {
+            SCROLLINFO position{sizeof(position), SIF_POS};
+            if (GetScrollInfo(window_, SB_VERT, &position))
+                pos = position.nPos;
+            break;
+        }
         case SB_TOP:
             pos = 0;
             break;
