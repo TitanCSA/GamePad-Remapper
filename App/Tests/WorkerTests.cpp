@@ -1,3 +1,4 @@
+#define IC_SDK_INTERNAL
 #include "Interceptor.h"
 #include "../Capture/Bridge.h"
 #include "../Capture/Service.h"
@@ -12,8 +13,9 @@
 #include <thread>
 #include <variant>
 
-// The production worker and script service are linked to this deterministic
-// transport instead of Interceptor.cpp. No driver/device API is linked or opened.
+// The production capture worker/service use this deterministic SDK transport.
+// The passive monitor is not started by this fixture; no host driver or HID
+// interface is opened.
 namespace fixture {
 using namespace Interceptor;
 using Packet = std::variant<Controller_Hid_Input, Controller_Xinput_Input,
@@ -102,6 +104,13 @@ void Reset(std::vector<Device> initial = {}) {
 
 namespace Interceptor {
 namespace Detail {
+std::shared_ptr<const Hid_Codec> Create_Hid_Decoder(std::vector<std::uint8_t>) {
+    throw std::runtime_error("Unexpected passive HID decoding in capture-worker fixture");
+}
+void Decode_Hid_Input(const std::shared_ptr<const Hid_Codec> &, Hid_Decoded_Input &,
+                      const std::uint8_t *, std::uint32_t, std::uint32_t) {
+    throw std::runtime_error("Unexpected passive HID decoding in capture-worker fixture");
+}
 // This friend is implemented only in the isolated test binary. The real SDK
 // Automatic_State/transport is neither compiled nor linked into this target.
 struct Automatic_State {

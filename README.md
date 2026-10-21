@@ -8,7 +8,7 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.2.3:** updated to controller SDK **1.0.4.1** and the corrected **1.0.6.1** driver installer with Microsoft-signed kernel **1.0.4.0**. Capture checks the loaded USB XUSB backend before starting. Localized Windows errors retain their message instead of appearing as invalid script encoding. [Controller state display](docs/images/controller-states.png).
+**2.2.4 candidate:** continuous, side-by-side **IN / OUT** debugging, including when no script is loaded. Requires the new controller kernel **1.0.5.0**, pending Microsoft signing. The latest downloadable release remains **2.2.3**, with installer **1.0.6.1** and signed kernel **1.0.4.0**. [Monitor details](docs/LIVE-MONITOR.md).
 
 Two workspaces, **Use script** and **Edit script**. Script authors declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block; players adjust them without touching the code. Settings are remembered per file and update a running script without recompilation or resetting its macros. [Create a script interface](docs/SCRIPT-INTERFACE.md).
 
@@ -56,16 +56,17 @@ settings and live session easy to distinguish.
 - **Fewer clicks:** automatic background validation, readable behavior summaries,
   connected controls first in selectors, and optional **Live apply valid edits**.
   Invalid edits keep the last working configuration.
-- **Monitor:** every available control in separate **INPUT** (physical) and
-  **OUTPUT** (accepted by the driver) columns. `*` identifies a changed value;
-  `--` means no accepted output is known yet. HID output reflects descriptor
-  limits and quantization, including controllers with multiple input reports.
-  Stopped sessions are labeled as historical. Forwarding counts, measured
-  processing time and copyable diagnostics remain available. Display updates
-  are event-driven and run separately from the input worker. An accepted report
-  is not an independent measurement of what a game or browser has consumed.
+- **Live IN / OUT (2.2.4 candidate):** the right panel continuously shows what
+  the filter receives from each controller beside the reports it completes
+  to Windows. No script or capture context is required. Applying a script
+  changes OUT; **Stop** restores passthrough and leaves the monitor running.
+  `*` marks different values and `--` means a value has not been measured.
+  Multiple HID reports retain independent field validity. Event-driven updates,
+  raw bytes, timestamps, report counts, losses and copyable diagnostics help
+  debug the full path. OUT measures the driver's Windows completion boundary;
+  it does not confirm that every application has consumed the report.
 
-## Start
+## Start (published 2.2.3)
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 

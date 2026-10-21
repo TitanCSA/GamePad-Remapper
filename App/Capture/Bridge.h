@@ -48,3 +48,6 @@ GR_API std::uint32_t __cdecl GR_GetDevice(std::uint32_t index, GR_Device *device
 // window. Acknowledge the posted WPARAM generation before reading a snapshot.
 GR_API void __cdecl GR_SetSnapshotWindow(HWND window, UINT message);
 GR_API BOOL __cdecl GR_AcknowledgeSnapshot(HWND window, ULONG_PTR generation);
+// Passive telemetry uses the same coalesced UI notification without waking or
+// creating a capture worker.
+GR_API void __cdecl GR_MonitorSnapshotChanged();

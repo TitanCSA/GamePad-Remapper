@@ -1,0 +1,84 @@
+{
+    "Schema":  1,
+    "Version":  "2.2.4",
+    "Stage":  "Candidate - Microsoft signing pending",
+    "CreatedUtc":  "2026-10-21T10:55:11.1263061Z",
+    "ApplicationSHA256":  "873DA399F7C63CE2006C36CD10F7E6C628A29286BEE4A36D00BB8A54634E9409",
+    "KernelVersion":  "1.0.5.0",
+    "KernelSHA256":  "70C6A5964EBE84BC1E9AFD8A22F6CC7EC31DBA6A0D1C912AF08B9E845402CCD3",
+    "SubmissionCABSHA256":  "691D1346A134D3CDA84097CF2F9E5212A3CF96D20B7941BD598FD58A4F56F6A7",
+    "SdkVersion":  "1.0.4.2",
+    "KernelSigningPending":  true,
+    "HostDriverOpened":  false,
+    "PhysicalControllersTested":  false,
+    "Offline":  {
+                    "Passed":  true,
+                    "CTestSuitesRelease":  10,
+                    "CTestSuitesAddressSanitizer":  10,
+                    "UiChecksRelease":  93,
+                    "UiChecksAddressSanitizer":  93,
+                    "MonitorChecks":  152,
+                    "ServiceChecks":  10080,
+                    "WorkerChecks":  25685,
+                    "Scopes":  [
+                                   "actual monitor and HID decoder with isolated IO boundary",
+                                   "first-boot and reopened subscription sessions",
+                                   "partial IN and OUT validity; loss and terminal removal",
+                                   "normal HID overlapped READ completion and cancellation",
+                                   "script Stop independent from passive observation",
+                                   "bounded GDI and USER resources, storage and DPI"
+                               ]
+                },
+    "Kernel":  {
+                   "ProductionBuild":  true,
+                   "WdkCodeAnalysis":  true,
+                   "RingChecks":  6039,
+                   "XusbChecks":  1030156,
+                   "GipChecks":  74294,
+                   "UsbLifecycleChecks":  352014,
+                   "HidLifecycleChecks":  960,
+                   "HidLifecycleScenarios":  17,
+                   "HidLifecycleMutationsRejected":  4,
+                   "AsanChangedPathsPassed":  true
+               },
+    "LiveVM":  {
+                   "Status":  "Passed",
+                   "KernelBodyMatchesSubmission":  true,
+                   "LaboratorySignature":  true,
+                   "LaboratoryInfVersion":  "1.0.5.1 (package ranking only)",
+                   "DriverVerifierFlags":  "0x001209bb",
+                   "VirtualFamilies":  [
+                                           "HID",
+                                           "XUSB",
+                                           "GIP"
+                                       ],
+                   "PassiveTrialRemainsUnstarted":  true,
+                   "ObservedRingLoss":  0,
+                   "ScriptApplyChangesObservedOut":  true,
+                   "ScriptStopKeepsObservation":  true,
+                   "NativeUiExeMatchesCandidate":  true,
+                   "NativeUiWidth":  1024,
+                   "CopyDiagnosticsVerified":  true,
+                   "BaselineRestored":  true,
+                   "HardwareLatencyMeasured":  false,
+                   "FinalPowerState":  "Off",
+                   "OriginalCheckpointsPreserved":  8,
+                   "IndependentAnalysisPassed":  true,
+                   "FreshModifiedSnapshots":  {
+                                                  "GipNativeRun":  191,
+                                                  "Hid":  179,
+                                                  "GipHidRun":  179,
+                                                  "Xusb":  191
+                                              },
+                   "FreshPostStopSnapshots":  {
+                                                  "GipNativeRun":  192,
+                                                  "Hid":  228,
+                                                  "GipHidRun":  228,
+                                                  "Xusb":  192
+                                              },
+                   "Mismatches":  0,
+                   "Caveat":  "Unknown initial values, stale egress and transition samples are excluded explicitly. Stimulus timing is not driver latency. Live XInputHID, power/hotplug and foreign capture transitions were not repeated; isolated tests cover their implemented boundaries."
+               },
+    "PublishedReleaseChanged":  false,
+    "Passed":  true
+}

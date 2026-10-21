@@ -7,9 +7,11 @@
 #include <system_error>
 #include <atomic>
 #include <thread>
+#include "MonitorFixture.h"
 
-// Deterministic callback-boundary test backend. This executable never links
-// the SDK or real capture worker and cannot create a driver context.
+// The capture callback boundary is deterministic and the passive monitor uses
+// an injected transport. The SDK is linked for its pure parser only; no real
+// capture, monitor control file or HID interface is opened by these tests.
 namespace {
 GR_Callback callback = nullptr;
 void *callbackUser = nullptr;
@@ -21,7 +23,7 @@ int lastWake = 0;
 std::uint32_t startError = 0;
 std::uint32_t probeError = 0, snapshotError = 0;
 std::wstring startCause = L"A precise injected startup cause";
-int starts = 0, stops = 0, checks = 0, parameterWakes = 0;
+int starts = 0, stops = 0, checks = 0, parameterWakes = 0, probes = 0;
 void Check(bool condition, const char *reason) {
     ++checks;
     if (!condition)
@@ -77,6 +79,7 @@ int Invoke(std::uint32_t key, int input = 20, std::uint32_t flags = 0) {
 }
 } // namespace
 std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters) {
+    ++probes;
     if (message && characters)
         wcsncpy_s(message, characters, probeError ? startCause.c_str() : L"Test capture backend", _TRUNCATE);
     return probeError;
@@ -105,6 +108,7 @@ void __cdecl GR_Stop() {
     callbackUser = nullptr;
 }
 void __cdecl GR_Wake() {}
+void __cdecl GR_MonitorSnapshotChanged() {}
 void __cdecl GR_ParametersChanged() { ++parameterWakes; }
 std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot *output) {
     if (snapshotError)
@@ -341,6 +345,69 @@ int main() {
               "Concurrent parameter publication preserves whole valid snapshots and never resets the "
               "running VM.");
         service.Stop();
+        {
+            auto passive = std::make_shared<monitor_fixture::State>();
+            passive->Metadata.push_back(monitor_fixture::Metadata(IC_TYPE_CONTROLLER_XUSB, 19));
+            const auto capturesBefore = starts;
+            const auto probesBefore = probes;
+            RemapperService watched(monitor_fixture::Factory(passive));
+            watched.StartMonitoring();
+            const auto await = [&](auto predicate) {
+                const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+                while (!predicate()) {
+                    if (std::chrono::steady_clock::now() >= until)
+                        throw std::runtime_error("Passive service fixture exceeded its deadline");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            };
+            await([&] { return watched.GetSnapshot().Monitoring; });
+            Check(starts == capturesBefore && probes == probesBefore && !watched.IsRunning(),
+                  "Starting passive monitoring performs no capture probe, context creation or trial access.");
+            passive->Push(monitor_fixture::Native(IC_TYPE_CONTROLLER_XUSB, 19, IC_MONITOR_IN, -32768));
+            await([&] { return watched.GetSnapshot().MonitorFrames == 1; });
+            auto observed = watched.GetSnapshot();
+            Check(observed.Devices.size() == 1 && observed.Devices[0].Telemetry &&
+                      observed.Devices[0].InputAvailable[0] && observed.Devices[0].Values[0] == -100 &&
+                      !observed.Devices[0].OutputValid && !observed.Devices[0].OutputAvailable[0],
+                  "Passive IN is measured without a script; OUT stays unknown until kernel egress.");
+            const auto identity = observed.Devices[0].Token;
+            watched.Inject(counting);
+            watched.Stop();
+            observed = watched.GetSnapshot();
+            Check(observed.Monitoring && !observed.Running && observed.Devices[0].Token == identity &&
+                      passive->Opens == 1 && passive->Closes == 0,
+                  "Applying/stopping a script preserves the independent passive observer and identity.");
+            watched.Inject(ScriptCompiler::Compile("int zero; main {set_val(LX,1/zero);}"));
+            Invoke(1);
+            Check(!watched.IsRunning() && watched.GetSnapshot().Monitoring,
+                  "A script fault releases capture while passive monitoring remains active.");
+            watched.Stop();
+            probeError = IC_ERROR_TRIAL_EXPIRED;
+            bool expired = false;
+            try { watched.Inject(counting); } catch (const std::system_error &error) {
+                expired = error.code().value() == IC_ERROR_TRIAL_EXPIRED;
+            }
+            probeError = 0;
+            Check(expired && watched.GetSnapshot().Monitoring,
+                  "Capture trial expiration does not revoke the passive observer.");
+            startError = ERROR_BUSY;
+            bool conflict = false;
+            try { watched.Inject(counting); } catch (const std::system_error &error) {
+                conflict = error.code().value() == ERROR_BUSY;
+            }
+            startError = 0;
+            Check(conflict && watched.GetSnapshot().Monitoring,
+                  "Another capture owner's conflict cannot terminate passive telemetry.");
+            passive->Push(monitor_fixture::Native(IC_TYPE_CONTROLLER_XUSB, 19, IC_MONITOR_OUT, 32767));
+            await([&] { return watched.GetSnapshot().MonitorFrames == 2; });
+            observed = watched.GetSnapshot();
+            Check(observed.Devices[0].Values[0] == -100 && observed.Devices[0].OutputValues[0] == 100 &&
+                      observed.Devices[0].OutputAvailable[0] && observed.Devices[0].Telemetry,
+                  "Only a real kernel OUT frame advances the displayed output after script stop/fault.");
+            watched.StopMonitoring();
+            Check(!watched.GetSnapshot().Monitoring && passive->Closes == 1,
+                  "Explicit monitor shutdown joins its thread and releases its observer once.");
+        }
         std::printf("Service boundary checks passed: %d; fake backend, no driver access\n", checks);
         return 0;
     } catch (const std::exception &error) {

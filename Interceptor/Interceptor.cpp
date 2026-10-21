@@ -1104,6 +1104,15 @@ void Hid_Codec::Decode(const std::shared_ptr<const Hid_Codec>& codec,Hid_Decoded
     }
     out.decode_complete=out.decode_error==ERROR_SUCCESS;
 }
+std::shared_ptr<const Hid_Codec> Create_Hid_Decoder(std::vector<std::uint8_t> preparsed) {
+    if(preparsed.empty()||preparsed.size()>65536)Fail("Invalid passive HID parser data size",ERROR_INVALID_DATA);
+    return Hid_Codec::Create(std::move(preparsed));
+}
+void Decode_Hid_Input(const std::shared_ptr<const Hid_Codec>& decoder,Hid_Decoded_Input& output,
+                      const std::uint8_t* report,std::uint32_t length,std::uint32_t source) {
+    if(length>IC_HID_REPORT_MAX){Hid_Input_Access::Clear(output);output.decode_error=ERROR_INVALID_DATA;return;}
+    Hid_Codec::Decode(decoder,output,report,length,source);
+}
 DWORD Hid_Codec::Encode(const Hid_Decoded_Input& in,std::uint8_t* report,std::uint32_t length,std::uint32_t source) {
     const auto& state=in.state;
     if(!in.codec_) {

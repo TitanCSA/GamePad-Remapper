@@ -1,5 +1,6 @@
 #include "Service.h"
 #include "Bridge.h"
+#include "DriverMonitor.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -78,11 +79,11 @@ struct RemapperService::Impl {
     bool started = false;
     std::uint64_t generation = 0;
     ServiceSnapshot cached;
+    DriverMonitor monitor;
 
-    Impl() {
-        wchar_t text[1024]{};
-        GR_Probe(text, 1024);
-        startupMessage = Utf8(text);
+    explicit Impl(DriverMonitor::Factory factory)
+        : monitor([] { GR_MonitorSnapshotChanged(); }, std::move(factory)) {
+        startupMessage = "No script capture active. Passive monitoring runs independently.";
         cached.Status = startupMessage;
     }
     void SetError(std::string text) {
@@ -156,12 +157,14 @@ struct RemapperService::Impl {
         return -1;
     }
 };
-RemapperService::RemapperService() : impl_(std::make_unique<Impl>()) {}
+RemapperService::RemapperService(DriverMonitor::Factory factory)
+    : impl_(std::make_unique<Impl>(std::move(factory))) {}
 RemapperService::~RemapperService() {
     try {
         Stop();
     } catch (...) {
     }
+    StopMonitoring();
 }
 void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program) {
     if (!program)
@@ -254,13 +257,27 @@ void RemapperService::Stop() {
     std::atomic_store_explicit(&self.pending, std::shared_ptr<const Impl::ProgramSlot>{},
                                std::memory_order_release);
 }
+void RemapperService::StartMonitoring() { impl_->monitor.Start(); }
+void RemapperService::StopMonitoring() { impl_->monitor.Stop(); }
 bool RemapperService::IsRunning() { return GetSnapshot().Running; }
 ServiceSnapshot RemapperService::GetSnapshot() {
     auto &self = *impl_;
+    const auto observed = self.monitor.Snapshot();
+    const auto applyMonitor = [&](ServiceSnapshot &result) {
+        result.Monitoring = observed.Running;
+        result.MonitorStatus = observed.Status;
+        result.MonitorError = observed.Error;
+        result.MonitorFrames = observed.Frames;
+        result.MonitorDropped = observed.Dropped;
+        result.MonitorTimestampFrequency = observed.TimestampFrequency;
+        if (observed.Requested) result.Devices = observed.Devices;
+    };
     std::unique_lock<std::mutex> lock(self.gate, std::try_to_lock);
     if (!lock) {
         std::lock_guard<std::mutex> cache(self.cacheGate);
-        return self.cached;
+        auto result = self.cached;
+        applyMonitor(result);
+        return result;
     }
     ServiceSnapshot result;
     const auto native = NativeSnapshot();
@@ -278,7 +295,7 @@ ServiceSnapshot RemapperService::GetSnapshot() {
         if (!self.callbackError.empty())
             result.Error = self.callbackError + (result.Error.empty() ? "" : "\n" + result.Error);
     }
-    const auto count = std::min(native.device_count, 256u);
+    const auto count = observed.Requested ? 0 : std::min(native.device_count, 256u);
     result.Devices.reserve(count);
     for (std::uint32_t i = 0; i < count; ++i) {
         GR_Device source{};
@@ -297,10 +314,12 @@ ServiceSnapshot RemapperService::GetSnapshot() {
         std::copy_n(source.output_values, 256, device.OutputValues.begin());
         for (std::size_t slot = 0; slot < 256; ++slot) {
             device.Available[slot] = (source.available[slot] & 1) != 0;
+            device.InputAvailable[slot] = device.Available[slot];
             device.OutputAvailable[slot] = (source.available[slot] & 2) != 0;
         }
         result.Devices.emplace_back(std::move(device));
     }
+    applyMonitor(result);
     {
         std::lock_guard<std::mutex> cache(self.cacheGate);
         self.cached = result;

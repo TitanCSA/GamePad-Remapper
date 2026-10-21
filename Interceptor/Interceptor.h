@@ -22,7 +22,7 @@
 #define IC_SDK_SERVICE L"InterceptorGamepadController"
 #define IC_SDK_DOS_DEVICE L"\\\\.\\InterceptorGamepadController"
 
-// Interceptor SDK 1.0.4.1. Compile Interceptor.cpp once alongside your application.
+// Interceptor SDK 1.0.4.2. Compile Interceptor.cpp once alongside your application.
 // This header has no local-header dependencies. Windows x64, C++17.
 
 // ---- Interceptor.h ----
@@ -729,6 +729,11 @@ template<class Inputs> auto Send_Input(const Inputs& inputs)
 // ---- WireInputs.h ----
 #include <type_traits>
 namespace Interceptor::Detail {
+// Internal pure parser adapter for passive telemetry. No device is opened and
+// no capture/automatic state is created by these functions.
+std::shared_ptr<const Hid_Codec> Create_Hid_Decoder(std::vector<std::uint8_t> preparsed);
+void Decode_Hid_Input(const std::shared_ptr<const Hid_Codec>& decoder,Hid_Decoded_Input& output,
+                     const std::uint8_t* report,std::uint32_t length,std::uint32_t source);
 struct Hid_Input_Access {
     static void Clear(Hid_Decoded_Input& output) {
         output.token.clear();output.state.axes.clear();output.state.triggers.clear();output.state.hats.clear();output.state.values.clear();output.state.buttons.clear();output.state.binary_values.clear();

@@ -49,9 +49,14 @@ driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-The nine CTest suites include the script-interface compiler/VM fixtures,
+The ten CTest suites include passive driver-monitor fixtures, the script-interface compiler/VM fixtures,
 concurrent parameter-publication checks and the actual capture worker against
 an isolated transport. The offline UI test also exercises
 custom controls, sidecar/fallback storage, workspace switching and DPI/resource
 lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
 values and recovery drafts are excluded.
+
+The 2.2.4 source candidate builds and tests normally. Release packaging is
+blocked until the new 1.0.5.0 controller kernel has a Microsoft signature and
+its installer hash is pinned. Packaging it with the older 1.0.4.0 installer
+would leave the continuous monitor unavailable.

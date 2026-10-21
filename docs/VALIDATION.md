@@ -1,5 +1,43 @@
 # Validation
 
+## 2.2.4 continuous monitor candidate
+
+The right panel observes independent IN and OUT telemetry, without a script or
+capture context. This candidate requires controller kernel **1.0.5.0**, pending
+Microsoft signing. SDK **1.0.4.2** reuses its descriptor parser through two pure
+internal adapter functions. The classic Interceptor product is unchanged.
+
+The application passes all ten offline CTest suites and 93 native UI checks in
+both optimized Release and AddressSanitizer builds. Monitor fixtures execute the actual monitor, descriptor decoder and
+Windows transport against isolated event/IO boundaries. They cover first
+subscription after boot, closing/reopening a session, multi-report HID validity,
+native and partial Guide state, lost records, late completions after removal,
+normal HID read cancellation and separation from capture/trial IO. Service and
+worker stress retains 10,080 and 25,685 checks. AddressSanitizer validation covers
+the changed monitor/service/worker paths. See [monitor behavior](LIVE-MONITOR.md).
+
+Kernel tests exercise the actual production ring and extracted report-completion
+and lifetime code. They verify no OUT at SEND acceptance or queue insertion,
+one IN per physical receive across backpressure, bounded observer loss, concurrent
+subscription/close, and normal versus terminal device lifetimes. Production and
+WDK code-analysis builds pass. These isolated checks do not measure physical
+hardware latency or establish compatibility with every device. Candidate results
+are recorded separately in [monitor-validation.json](monitor-validation.json);
+the historical release results below retain their original scope.
+
+In the isolated Windows 11 VM, the real monitor receives valid HID, XUSB and
+GIP IN/OUT reports before loading a script, with zero observed ring loss. The
+trial remains unstarted throughout those passive runs. Real service tests then
+apply a script, observe modified Windows completions and stop capture while
+monitoring continues. The final application also exercises the native UI and
+Copy diagnostics at 1024 pixels. These tests use controlled virtual devices and
+Driver Verifier, not physical controllers or a latency benchmark.
+
+The VM uses a development-signed copy of the exact production kernel body. An
+isolated INF version 1.0.5.1 avoids Windows caching an earlier same-version lab
+package; only that lab metadata/catalog differs. The submission remains kernel
+1.0.5.0 and requires Microsoft's signature before release packaging.
+
 ## 2.2.3 current driver integration
 
 This version uses the exact two-file Interceptor Gamepad & Controller SDK **1.0.4.1** and bundles the unchanged **1.0.6.1** installer with Microsoft-signed kernel **1.0.4.0**. Older sections below describe historical releases and their driver versions. The classic Interceptor product is unchanged.

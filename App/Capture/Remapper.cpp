@@ -726,6 +726,7 @@ void __cdecl GR_SetSnapshotWindow(HWND window, UINT message) {
 BOOL __cdecl GR_AcknowledgeSnapshot(HWND window, ULONG_PTR generation) {
     return snapshotNotification.Acknowledge(window, generation) ? TRUE : FALSE;
 }
+void __cdecl GR_MonitorSnapshotChanged() { snapshotNotification.Changed(); }
 
 std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters) {
     try {

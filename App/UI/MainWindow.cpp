@@ -75,6 +75,7 @@ enum Id {
     RemoveStep,
     UpStep,
     DownStep,
+    MonitorAction = 140,
     Property = 1000
 };
 enum Field {
@@ -317,6 +318,8 @@ class MainWindow final {
     bool demo_ = false, visual_ = false, building_ = false, settingCode_ = false, busy_ = false,
          closing_ = false, closeRequested_ = false, invalidVisual_ = false, reduced_ = false,
          formDirty_ = false, layoutTest_ = false;
+    bool monitorAccessRequired_ = false;
+    bool monitorStarting_ = false;
     std::uint64_t version_ = 0, accepted_ = 0;
     int scroll_ = 0, formHeight_ = 0;
     std::filesystem::path libraryDirectory_, currentPath_, draftPath_, consumedDraft_;
@@ -342,7 +345,7 @@ class MainWindow final {
     ServiceSnapshot snapshot_;
     std::function<int(const std::wstring &)> discardPrompt_;
     RECT editorRect_{};
-    int libraryWidth_ = 224, inspectorWidth_ = 264;
+    int libraryWidth_ = 224, inspectorWidth_ = 280;
     static LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
         MainWindow *self = reinterpret_cast<MainWindow *>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (message == WM_NCCREATE) {
@@ -477,7 +480,8 @@ class MainWindow final {
         format.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE;
         format.crTextColor = Ink;
         const auto actualDpi = GetDpiForWindow(control);
-        format.yHeight = MulDiv(mono ? 210 : 225, static_cast<int>(dpi_),
+        const int textSize = mono ? (GetDlgCtrlID(control) == Monitor ? 180 : 210) : 225;
+        format.yHeight = MulDiv(textSize, static_cast<int>(dpi_),
                                 static_cast<int>(actualDpi ? actualDpi : 96));
         wcscpy_s(format.szFaceName, mono ? L"Consolas" : L"Segoe UI");
         SendMessageW(control, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
@@ -502,6 +506,7 @@ class MainWindow final {
                                                        {Stop, L"Stop"},
                                                        {Driver, L"Driver setup"},
                                                        {Copy, L"Copy diagnostics"},
+                                                       {MonitorAction, L"Enable live IN / OUT"},
                                                        {AddRule, L"+ Rule"},
                                                        {AddMacro, L"+ Macro"},
                                                        {Infinity, L"Infinity recipe"},
@@ -526,9 +531,10 @@ class MainWindow final {
         SendMessageW(controls_[Code], EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_SCROLL);
         SetWindowSubclass(controls_[Code], CodeProcedure, 1, reinterpret_cast<DWORD_PTR>(this));
         controls_[Monitor] =
-            Control(Monitor, MSFTEDIT_CLASS, L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL |
-                    WS_VSCROLL | WS_HSCROLL | WS_TABSTOP);
+            Control(Monitor, MSFTEDIT_CLASS, L"",
+                    ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_HSCROLL | WS_VSCROLL | WS_TABSTOP);
         Rich(controls_[Monitor], true);
+        SendMessageW(controls_[Monitor], EM_SETTARGETDEVICE, 0, 0);
         SendMessageW(controls_[Monitor], EM_EXLIMITTEXT, 0, 4 * 1024 * 1024);
         form_ = CreateWindowExW(0, L"GprVisualForm", L"", WS_CHILD | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0,
                                 1, 1, window_, reinterpret_cast<HMENU>(Form), instance_, nullptr);
@@ -553,11 +559,13 @@ class MainWindow final {
         ui::SetAccessibleName(controls_[VisualList], L"Visual rules, macros and constants");
         ui::SetAccessibleName(controls_[FindText], L"Find in script");
         ui::SetAccessibleName(controls_[Code], L"Script code");
-        ui::SetAccessibleName(controls_[Monitor], L"Controller live details");
+        ui::SetAccessibleName(controls_[Monitor], L"Live controller input and Windows output");
+        ui::SetAccessibleName(controls_[MonitorAction], L"Enable or retry passive driver monitoring");
         SendMessageW(controls_[FindText], EM_SETCUEBANNER, FALSE,
                      reinterpret_cast<LPARAM>(L"Find in script"));
         EnableWindow(controls_[Stop], FALSE);
         ShowWindow(controls_[Recover], SW_HIDE);
+        ShowWindow(controls_[MonitorAction], SW_HIDE);
     }
     void Visibility() {
         for (int id : {AddRule, AddMacro, Infinity, AddConstant, RemoveItem, VisualList})
@@ -581,7 +589,7 @@ class MainWindow final {
         const int width = MulDiv(r.right, 96, static_cast<int>(dpi_));
         const int height = MulDiv(r.bottom, 96, static_cast<int>(dpi_));
         libraryWidth_ = width < 1100 ? 184 : 224;
-        inspectorWidth_ = width < 1100 ? 208 : width < 1300 ? 264 : 320;
+        inspectorWidth_ = width < 1300 ? 280 : 320;
         const int ex = libraryWidth_ + 24, er = width - inspectorWidth_ - 24;
         const int ew = er - ex, bottom = height - 32, contentBottom = bottom - 108;
         editorRect_ = {S(ex), S(96), S(er), S(bottom)};
@@ -599,12 +607,16 @@ class MainWindow final {
         Place(controls_[Folder], 20, bottom - 76, libraryWidth_ - 40, 36);
         Place(controls_[Save], er - 152, 104, 64, 36);
         Place(controls_[SaveAs], er - 80, 104, 80, 36);
-        Place(controls_[CodeTab], ex, 176, 80, 36);
-        Place(controls_[VisualTab], ex + 88, 176, 80, 36);
-        Place(controls_[Check], ex + 184, 176, 76, 36);
-        const int findWidth = ew < 500 ? 104 : 142;
-        Place(controls_[FindText], er - findWidth - 66, 176, findWidth, 36);
-        Place(controls_[FindNext], er - 58, 176, 58, 36);
+        const bool narrowEditor = ew < 440;
+        Place(controls_[CodeTab], ex, 176, narrowEditor ? 64 : 80, 36);
+        Place(controls_[VisualTab], ex + (narrowEditor ? 72 : 88), 176,
+              narrowEditor ? 64 : 80, 36);
+        Place(controls_[Check], ex + (narrowEditor ? 144 : 184), 176,
+              narrowEditor ? 64 : 76, 36);
+        const int findWidth = narrowEditor ? 84 : ew < 500 ? 104 : 142;
+        const int findNextWidth = narrowEditor ? 50 : 58;
+        Place(controls_[FindText], er - findWidth - findNextWidth - 8, 176, findWidth, 36);
+        Place(controls_[FindNext], er - findNextWidth, 176, findNextWidth, 36);
         Place(controls_[Code], ex, 232, ew, std::max(80, contentBottom - 232));
         Place(controls_[ResetParameters], er - 140, 176, 140, 36);
         if (parameterPanel_)
@@ -615,7 +627,11 @@ class MainWindow final {
         SendMessageW(controls_[Code], EM_SETRECT, 0, reinterpret_cast<LPARAM>(&codeArea));
         int bx = ex;
         for (const auto item :
-             (ew < 520 ? std::vector<std::pair<int, int>>{{AddRule, 64},
+             (narrowEditor ? std::vector<std::pair<int, int>>{{AddRule, 56},
+                                                              {AddMacro, 62},
+                                                              {Infinity, 88},
+                                                              {AddConstant, 80}}
+              : ew < 520 ? std::vector<std::pair<int, int>>{{AddRule, 64},
                                                           {AddMacro, 72},
                                                           {Infinity, 104},
                                                           {AddConstant, 86}}
@@ -624,17 +640,22 @@ class MainWindow final {
             Place(controls_[item.first], bx, 232, item.second, 34);
             bx += item.second + 8;
         }
-        Place(controls_[RemoveItem], er - 72, 232, 72, 34);
+        SetText(controls_[Infinity], narrowEditor ? L"Infinity" : L"Infinity recipe");
+        Place(controls_[RemoveItem], er - (narrowEditor ? 64 : 72), 232,
+              narrowEditor ? 64 : 72, 34);
         const int listWidth = ew < 520 ? 112 : 128;
         Place(controls_[VisualList], ex, 286, listWidth, std::max(40, contentBottom - 286));
         Place(form_, ex + listWidth + 16, 286, ew - listWidth - 16, std::max(40, contentBottom - 286));
-        Place(controls_[Live], ex, bottom - 58, 148, 38);
-        Place(controls_[Stop], er - 268, bottom - 58, 80, 40);
-        Place(controls_[Inject], er - 180, bottom - 58, 180, 40);
+        const int injectWidth = narrowEditor ? 150 : 180;
+        Place(controls_[Live], ex, bottom - 58, narrowEditor ? 120 : 148, 38);
+        Place(controls_[Stop], er - injectWidth - 88, bottom - 58, 80, 40);
+        Place(controls_[Inject], er - injectWidth, bottom - 58, injectWidth, 40);
         const int rx = width - inspectorWidth_ + 24;
-        const int monitorTop = height < 700 ? 304 : 376;
+        const int monitorTop = height < 600 ? 264 : height < 700 ? 304 : 376;
+        const bool monitorAction = !demo_ && !snapshot_.Monitoring;
         Place(controls_[Monitor], rx, monitorTop, inspectorWidth_ - 48,
-              std::max(64, bottom - 64 - monitorTop));
+              std::max(64, bottom - (monitorAction ? 110 : 64) - monitorTop));
+        Place(controls_[MonitorAction], rx, bottom - 106, inspectorWidth_ - 48, 38);
         Place(controls_[Copy], rx, bottom - 60, inspectorWidth_ - 48, 38);
         if (!usage_ && visual_ && !formDirty_)
             BuildForm();
@@ -702,35 +723,46 @@ class MainWindow final {
         const auto message = !error_.empty() ? L"!  " + Utf16(error_) : Utf16(status_);
         Draw(dc, message, {S(ex), S(bottom - 96), S(er), S(bottom - 74)}, Ink, font_,
              DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, L"Session", {S(rx), S(108), S(width - 24), S(135)}, Ink, headingFont_);
+        Draw(dc, L"Live IN / OUT", {S(rx), S(108), S(width - 24), S(135)}, Ink, headingFont_);
         const auto session = demo_               ? L"Preview"
-                             : busy_             ? L"Connecting"
-                             : snapshot_.Running ? L"Running"
-                                                 : L"Stopped";
+                             : snapshot_.Monitoring ? L"Observing"
+                             : monitorStarting_ ? L"Connecting"
+                             : monitorAccessRequired_ ? L"Access required"
+                                                      : L"Unavailable";
         Fill(dc, {S(rx), S(157), S(rx + 7), S(164)},
-             demo_ || snapshot_.Running || busy_ ? Accent : Muted, 7);
+             demo_ || snapshot_.Monitoring ? Accent : Muted, 7);
         Draw(dc, session, {S(rx + 18), S(147), S(width - 24), S(178)}, Ink, headingFont_);
         Draw(dc,
              demo_               ? L"Simulated controller"
              : snapshot_.Running ? L"Your script is active"
-                                 : L"Apply a script to begin",
-             {S(rx), S(188), S(width - 24), S(212)}, Muted, smallFont_);
+             : snapshot_.Monitoring ? L"No script - passthrough"
+                                    : L"Editor remains available",
+             {S(rx), S(height < 600 ? 184 : 188), S(width - 24), S(height < 600 ? 204 : 212)},
+             Muted, smallFont_);
         const int countTop = height < 700 ? 208 : 250;
         const int labelTop = height < 700 ? 242 : 290;
-        const int controllerTop = height < 700 ? 274 : 346;
+        const int controllerTop = height < 600 ? 234 : height < 700 ? 274 : 346;
         const int halfInspector = (inspectorWidth_ - 48) / 2;
         if (height >= 700)
             line(rx, 228, width - 24, 229);
-        Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.Received),
-             {S(rx), S(countTop), S(rx + halfInspector), S(countTop + 34)}, Ink, titleFont_,
-             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.Changed),
-             {S(rx + halfInspector + 8), S(countTop), S(width - 24), S(countTop + 34)}, Ink, titleFont_,
-             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, L"Inputs", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted,
-             smallFont_);
-        Draw(dc, L"Modified", {S(rx + halfInspector + 8), S(labelTop), S(width - 24), S(labelTop + 20)},
-             Muted, smallFont_);
+        if (height < 600)
+            Draw(dc, demo_ ? L"Preview frames"
+                          : std::to_wstring(snapshot_.MonitorFrames) + L" frames / " +
+                                std::to_wstring(snapshot_.MonitorDropped) + L" lost",
+                 {S(rx), S(208), S(width - 24), S(228)}, Muted, smallFont_,
+                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        else {
+            Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.MonitorFrames),
+                 {S(rx), S(countTop), S(rx + halfInspector), S(countTop + 34)}, Ink, titleFont_,
+                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+            Draw(dc, demo_ ? L"—" : std::to_wstring(snapshot_.MonitorDropped),
+                 {S(rx + halfInspector + 8), S(countTop), S(width - 24), S(countTop + 34)}, Ink, titleFont_,
+                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+            Draw(dc, L"Frames", {S(rx), S(labelTop), S(rx + halfInspector), S(labelTop + 20)}, Muted,
+                 smallFont_);
+            Draw(dc, L"Lost", {S(rx + halfInspector + 8), S(labelTop), S(width - 24), S(labelTop + 20)},
+                 Muted, smallFont_);
+        }
         line(rx, controllerTop - (height < 700 ? 8 : 18), width - 24,
              controllerTop - (height < 700 ? 7 : 17));
         Draw(dc, L"Controllers", {S(rx), S(controllerTop), S(width - 24), S(controllerTop + 22)}, Ink,
@@ -1185,7 +1217,7 @@ class MainWindow final {
     int FormWidth() const {
         RECT r{};
         GetClientRect(form_, &r);
-        return std::max(260, MulDiv(r.right, 96, static_cast<int>(dpi_)) - 24);
+        return std::max(180, MulDiv(r.right, 96, static_cast<int>(dpi_)) - 24);
     }
     VisualCondition *ConditionAt(VisualMacro &macro, const std::vector<std::size_t> &path) {
         if (!macro.Condition) {
@@ -1339,8 +1371,9 @@ class MainWindow final {
             for (auto item : std::vector<std::pair<int, std::wstring>>{{AddCondition, L"Add condition"},
                                                                        {RemoveCondition, L"Remove"}}) {
                 auto button = Button(item.first, item.second, form_);
-                Place(button, item.first == AddCondition ? 12 : 160, y - scroll_,
-                      item.first == AddCondition ? 140 : 84, 34);
+                const int addWidth = std::min(140, width - 92);
+                Place(button, item.first == AddCondition ? 12 : 20 + addWidth, y - scroll_,
+                      item.first == AddCondition ? addWidth : 84, 34);
                 fields_[item.first] = button;
             }
             y += 48;
@@ -1439,10 +1472,14 @@ class MainWindow final {
                                                                            {UpStep, L"↑"},
                                                                            {DownStep, L"↓"}}) {
                     auto button = Button(item.first, item.second, form_);
-                    Place(button, x, y - scroll_,
-                          item.first == AddStep || item.first == RemoveStep ? 88 : 40, 29);
+                    const int buttonWidth = item.first == AddStep || item.first == RemoveStep ? 88 : 40;
+                    if (x + buttonWidth > width + 12) {
+                        x = 12;
+                        y += 37;
+                    }
+                    Place(button, x, y - scroll_, buttonWidth, 29);
                     fields_[item.first] = button;
-                    x += item.first == AddStep || item.first == RemoveStep ? 96 : 48;
+                    x += buttonWidth + 8;
                 }
                 y += 48;
             }
@@ -1831,6 +1868,7 @@ class MainWindow final {
                        AddMacro, Infinity, AddConstant, RemoveItem, Live})
             EnableWindow(controls_[id], !value && !(demo_ && id == Inject));
         EnableWindow(controls_[Stop], snapshot_.Running && !value);
+        EnableWindow(controls_[MonitorAction], !value && !monitorStarting_);
         if (value)
             SetTimer(window_, 2, reduced_ ? 150 : 30, nullptr);
         else
@@ -1846,7 +1884,17 @@ class MainWindow final {
         Queue();
         injectVersion_ = version_;
     }
-    void Elevated() {
+    std::wstring SessionArguments(const std::filesystem::path &pending, bool inject) const {
+        std::wstring parameters = L"--session " + Quote(pending.wstring()) + L" --origin " +
+                                  Quote(currentPath_.wstring());
+        if (inject) {
+            parameters += L" --inject";
+            if (SendMessageW(controls_.at(Live), BM_GETCHECK, 0, 0) == BST_CHECKED)
+                parameters += L" --live-apply";
+        }
+        return parameters;
+    }
+    void Elevated(bool inject) {
         const auto directory = ScriptStorage::SessionDirectory();
         std::filesystem::create_directories(directory);
         const auto pending = directory / draftPath_.filename();
@@ -1859,10 +1907,7 @@ class MainWindow final {
         std::wstring executable(32768, L'\0');
         executable.resize(
             GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size())));
-        std::wstring parameters = L"--session " + Quote(pending.wstring()) + L" --origin " +
-                                  Quote(currentPath_.wstring()) + L" --inject";
-        if (SendMessageW(controls_[Live], BM_GETCHECK, 0, 0) == BST_CHECKED)
-            parameters += L" --live-apply";
+        const auto parameters = SessionArguments(pending, inject);
         SHELLEXECUTEINFOW request{};
         request.cbSize = sizeof(request);
         request.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -1875,17 +1920,38 @@ class MainWindow final {
             const auto failure = GetLastError();
             std::error_code ignored;
             std::filesystem::remove(pending, ignored);
+            std::filesystem::remove(std::filesystem::path(pending.wstring() + L".settings.json"),
+                                    ignored);
             Busy(false);
             if (failure == ERROR_CANCELLED) {
                 status_ = "Administrator prompt cancelled. Your script is still open.";
                 return;
             }
-            throw std::runtime_error("Windows could not start the elevated app.");
+            throw std::runtime_error("Windows could not start the elevated app. Windows error " +
+                                     std::to_string(failure) + ".");
         }
         if (request.hProcess)
             CloseHandle(request.hProcess);
         closing_ = true;
         DestroyWindow(window_);
+    }
+    void RequestMonitoring() {
+        // Demo/render/self-test windows must never construct or open a driver reader.
+        if (demo_ || busy_ || monitorStarting_ || !service_)
+            return;
+        if (!Administrator()) {
+            Elevated(false);
+            return;
+        }
+        monitorAccessRequired_ = false;
+        monitorStarting_ = true;
+        try {
+            service_->StartMonitoring();
+        } catch (...) {
+            monitorStarting_ = false;
+            throw;
+        }
+        Refresh();
     }
     void StartOperation(bool inject, std::shared_ptr<const ScriptProgram> program = {}) {
         if (!service_) {
@@ -1945,7 +2011,7 @@ class MainWindow final {
             }
             try {
                 if (!Administrator())
-                    Elevated();
+                    Elevated(true);
                 else
                     StartOperation(true, result->Program);
             } catch (...) {
@@ -1986,16 +2052,18 @@ class MainWindow final {
                 InvalidateRect(window_, &editorRect_, FALSE);
             }
         }
-        if (busy_ || demo_ || !service_)
+        if (demo_ || !service_)
             return;
         const bool wasActive = !active_.empty();
         snapshot_ = service_->GetSnapshot();
-        if (!snapshot_.Running) {
+        if (snapshot_.Monitoring || !snapshot_.MonitorError.empty())
+            monitorStarting_ = false;
+        if (!busy_ && !snapshot_.Running) {
             active_.clear();
             activeProgram_.reset();
             activePath_.clear();
         }
-        EnableWindow(controls_[Stop], snapshot_.Running);
+        EnableWindow(controls_[Stop], snapshot_.Running && !busy_);
         // A slow health refresh is independent of event-driven input display.
         SetTimer(window_, 1, 1000, nullptr);
         UpdateMonitor();
@@ -2007,11 +2075,16 @@ class MainWindow final {
         if (wasActive != !active_.empty())
             InvalidateRect(window_, &editorRect_, FALSE);
     }
-    std::string Values(const ServiceDevice &device) const {
-        if (!device.PhysicalValid)
-            return "Waiting for a physical report\nNo values measured yet.";
+    std::string Values(const ServiceDevice &device, std::uint64_t now = 0,
+                       std::uint64_t frequency = 0) const {
+        // Script submission success is not proof of Windows-facing output.
+        const bool measured = device.Telemetry || demo_;
+        const bool input = measured && device.PhysicalValid;
+        const bool egress = measured && device.OutputValid;
         std::ostringstream output;
-        output << "          INPUT OUTPUT\n";
+        if (!input && !egress)
+            output << "No values measured yet.\n";
+        output << "              IN   OUT\n";
         const auto value = [](std::size_t slot, int number, bool valid) {
             if (!valid)
                 return std::string("--");
@@ -2024,67 +2097,160 @@ class MainWindow final {
             return std::to_string(number) + "%";
         };
         for (std::size_t i = 0; i < 256; ++i) {
-            if (!device.Available[i])
+            if (!device.Available[i] && !device.InputAvailable[i] && !device.OutputAvailable[i])
                 continue;
+            const bool inputKnown = input && device.InputAvailable[i];
+            const bool outputKnown = egress && device.OutputAvailable[i];
             output << std::left << std::setw(10) << Controls::Names()[i]
-                   << std::right << std::setw(5) << value(i, device.Values[i], true) << " "
-                   << std::setw(5) << value(i, device.OutputValues[i],
-                                            device.OutputValid && device.OutputAvailable[i])
-                   << (device.OutputValid && device.OutputAvailable[i] &&
+                   << std::right << std::setw(5) << value(i, device.Values[i], inputKnown) << " "
+                   << std::setw(5) << value(i, device.OutputValues[i], outputKnown)
+                   << (inputKnown && outputKnown &&
                        device.OutputValues[i] != device.Values[i] ? " *" : "")
                    << "\n";
         }
-        output << "\n* Differs from physical\nINPUT: physical\nOUTPUT: accepted by driver";
+        output << "\nIN #" << (input ? std::to_string(device.InputSequence) : "--")
+               << "  OUT #" << (egress ? std::to_string(device.OutputSequence) : "--");
+        if (frequency && now) {
+            const auto age = [now, frequency](std::uint64_t timestamp, bool valid) {
+                if (!valid || !timestamp || now < timestamp)
+                    return std::string("--");
+                return std::to_string(static_cast<std::uint64_t>(
+                           static_cast<long double>(now - timestamp) * 1000 / frequency)) + " ms";
+            };
+            output << "\nReport age IN " << age(device.InputTimestamp, input)
+                   << "\n           OUT " << age(device.OutputTimestamp, egress);
+        }
+        if (input && egress && device.OutputTimestamp < device.InputTimestamp)
+            output << "\nOUT predates latest IN";
+        output << "\n-- Not measured\n* Differs from physical";
+        if (demo_)
+            output << "\nIN / OUT are simulated";
+        else
+            output << "\nIN: physical driver report\nOUT: observed driver egress";
         return output.str();
     }
     void UpdateMonitor() {
+        LARGE_INTEGER clock{};
+        if (snapshot_.MonitorTimestampFrequency)
+            QueryPerformanceCounter(&clock);
+        const auto now = static_cast<std::uint64_t>(clock.QuadPart);
+        const bool action = !demo_ && !snapshot_.Monitoring;
+        const bool wasAction = (GetWindowLongPtrW(controls_[MonitorAction], GWL_STYLE) & WS_VISIBLE) != 0;
+        if (action != wasAction)
+            ShowWindow(controls_[MonitorAction], action ? SW_SHOW : SW_HIDE);
+        SetText(controls_[MonitorAction], monitorStarting_ ? L"Connecting..."
+                                         : monitorAccessRequired_ ? L"Enable live IN / OUT"
+                                                               : L"Retry live IN / OUT");
+        EnableWindow(controls_[MonitorAction], !busy_ && !monitorStarting_);
+        if (action != wasAction)
+            Layout();
         std::ostringstream diagnostic;
-        diagnostic << "GamePad Remapper 2.2 - native C++\n"
-                   << (demo_ ? "SIMULATED PREVIEW - no driver or controller access" : snapshot_.Status)
-                   << "\n\n"
-                   << (snapshot_.Running ? "Configuration active" : "Not capturing") << "\n"
+        diagnostic << "GamePad Remapper - native C++\n"
+                   << (demo_ ? "SIMULATED PREVIEW - no driver or controller access"
+                             : "PASSIVE DRIVER IN / OUT")
+                   << "\nObserver: " << (snapshot_.Monitoring ? "active" : "inactive")
+                   << "\nElevation required: " << (monitorAccessRequired_ ? "yes" : "no")
+                   << "\n" << snapshot_.MonitorStatus << "\n" << snapshot_.MonitorError
+                   << "\n" << snapshot_.MonitorFrames << " telemetry frames / "
+                   << snapshot_.MonitorDropped << " lost frames\n"
+                   << "Timestamp clock: QPC / frequency " << snapshot_.MonitorTimestampFrequency
+                   << "\n\nScript: " << (snapshot_.Running ? "active" : "stopped") << "\n"
+                   << snapshot_.Status << "\n"
                    << snapshot_.Received << " received / " << snapshot_.Forwarded << " forwarded\n"
                    << snapshot_.Changed << " changed / " << snapshot_.TimerOutputs << " timed outputs\n"
                    << snapshot_.Faults << " faults\n"
                    << std::fixed << std::setprecision(2) << snapshot_.ProcessingMicroseconds
                    << " us software processing\n\n";
         std::ostringstream visible;
+        const auto prose = [this](const std::string &text) {
+            const auto columns = static_cast<std::size_t>(std::max(24, (inspectorWidth_ - 72) / 8));
+            std::istringstream lines(text);
+            std::ostringstream wrapped;
+            std::string line;
+            while (std::getline(lines, line)) {
+                while (line.size() > columns) {
+                    const auto split = line.find_last_of(' ', columns);
+                    if (split == std::string::npos || !split)
+                        break;
+                    wrapped << line.substr(0, split) << '\n';
+                    line.erase(0, split + 1);
+                }
+                wrapped << line << '\n';
+            }
+            return wrapped.str();
+        };
         if (demo_ && snapshot_.Devices.empty())
             visible
-                << "Preview gamepad\nOffline example\n\nLX  0    LY  0\nRX  0    RY  0\n\nLive controls "
-                   "appear here\nafter you apply a script.";
+                << "SIMULATED PREVIEW\nNo controller access\n\nLive IN / OUT appears automatically "
+                   "with the driver.\nNo script is required.";
         else if (snapshot_.Devices.empty())
             visible
-                << (snapshot_.Running
-                        ? "Waiting for a controller...\n\nCompatible controllers appear automatically."
-                        : "No active session\n\nApply your script to connect a controller.");
+                << (monitorStarting_
+                        ? "Opening driver telemetry...\n\nThe editor remains available."
+                        : snapshot_.Monitoring
+                        ? "Waiting for driver reports...\n\nMove a controller or press a button.\n"
+                          "No script is required."
+                        : monitorAccessRequired_
+                              ? "Administrator access required\n\nEnable live IN / OUT to observe "
+                                "physical input and driver output.\n\nThe editor works without it."
+                              : "Live observation unavailable\n\nRetry, or use Driver setup to "
+                                "install the compatible driver.\n\nThe editor remains available.");
         if (demo_ && !snapshot_.Devices.empty())
             visible << "SIMULATED PREVIEW\nNo controller access\n\n";
-        if (!snapshot_.Running && !snapshot_.Devices.empty())
-            visible << "Last session states\nCapture is stopped\n\n";
+        if (!demo_ && !snapshot_.Monitoring && !snapshot_.Devices.empty())
+            visible << "Last measured states\nObserver is not active\n\n";
+        if (snapshot_.MonitorDropped)
+            visible << "\nTelemetry lost: " << snapshot_.MonitorDropped
+                    << " frames. Unknown values need a new report.\n\n";
         for (const auto &device : snapshot_.Devices) {
-            visible << device.Name << "\n" << Values(device) << "\n\n";
+            visible << device.Name << "\n"
+                    << Values(device, now, snapshot_.MonitorTimestampFrequency) << "\n\n";
             diagnostic << device.Name << "\n"
                        << device.Token << "\n"
+                       << "Family " << device.Family << ", key " << device.Key
+                       << ", kernel telemetry " << (device.Telemetry ? "yes" : "no") << "\n"
                        << std::count(device.Available.begin(), device.Available.end(), true)
                        << " available controls\n"
-                       << Values(device) << "\n"
+                       << "IN valid=" << device.PhysicalValid << ", sequence=" << device.InputSequence
+                       << ", timestamp=" << device.InputTimestamp << ", known controls="
+                       << std::count(device.InputAvailable.begin(), device.InputAvailable.end(), true)
+                       << "\nOUT valid=" << device.OutputValid << ", sequence=" << device.OutputSequence
+                       << ", timestamp=" << device.OutputTimestamp << ", known controls="
+                       << std::count(device.OutputAvailable.begin(), device.OutputAvailable.end(), true)
+                       << "\n" << Values(device, now, snapshot_.MonitorTimestampFrequency) << "\n"
                        << device.Diagnostic << "\n\n";
+            const auto raw = [&](const char *direction, std::uint32_t status,
+                                 const std::vector<std::uint8_t> &bytes) {
+                diagnostic << direction << " NTSTATUS 0x" << std::uppercase << std::hex
+                           << std::setfill('0') << std::setw(8) << status << std::dec
+                           << std::setfill(' ') << ", " << bytes.size() << " report bytes:";
+                for (const auto byte : bytes)
+                    diagnostic << ' ' << std::hex << std::setfill('0') << std::setw(2)
+                               << static_cast<unsigned>(byte);
+                diagnostic << std::dec << std::setfill(' ') << "\n";
+            };
+            raw("IN", device.InputStatus, device.InputRaw);
+            raw("OUT", device.OutputStatus, device.OutputRaw);
             if (device.Family == 3)
                 diagnostic
                     << "Generic HID uses reported AXIS / BUTTON / VALUE controls; face aliases are "
                        "not guessed.\n\n";
         }
         if (!error_.empty())
-            visible << "\nScript needs attention\n" << error_;
+            visible << "\nScript needs attention\n" << prose(error_);
         if (!snapshot_.Error.empty())
-            visible << "\nConnection details\n" << snapshot_.Error;
+            visible << "\nScript connection details\n" << prose(snapshot_.Error);
+        if (!snapshot_.MonitorError.empty())
+            visible << "\nObserver details\n" << prose(snapshot_.MonitorError);
         diagnostic
             << "DIAGNOSTICS\n"
             << (!error_.empty() ? error_ : status_) << "\n"
             << snapshot_.Error << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\n"
-            << "Stop or close restores normal input.\nSoftware timing excludes USB/controller/display "
-               "latency.";
+            << "Stop removes script capture; the passive observer continues.\n"
+            << "Passive monitoring does not start a capture or consume the demo.\n"
+            << "IN and OUT are independent last measured fields, not a latency comparison.\n"
+            << "OUT observes the report released by the driver, not whether each application read it.\n"
+            << "Software timing excludes USB/controller/display latency.";
         diagnostic_ = diagnostic.str();
         const auto text = Utf16(visible.str());
         if (Text(controls_[Monitor]) != text) {
@@ -2262,6 +2428,9 @@ class MainWindow final {
             break;
         case Copy:
             Clipboard(window_, Utf16(diagnostic_));
+            break;
+        case MonitorAction:
+            RequestMonitoring();
             break;
         case Folder:
             std::filesystem::create_directories(libraryDirectory_);
@@ -2461,7 +2630,7 @@ class MainWindow final {
                 activeValues_ = result->Values;
                 error_.clear();
                 status_ = result->Injected ? "✓ Configuration applied atomically"
-                                           : "Session stopped · normal input restored";
+                                           : "Script stopped · normal input restored";
             } else
                 Error(result->Error);
             Refresh();
@@ -2534,8 +2703,14 @@ class MainWindow final {
         Visibility();
         UpdateMonitor();
         SetTimer(window_, 1, 1000, nullptr);
-        if (!demo_)
+        if (!demo_) {
             GR_SetSnapshotWindow(window_, SnapshotMessage);
+            monitorAccessRequired_ = !Administrator();
+            if (!monitorAccessRequired_)
+                RequestMonitoring();
+            else
+                UpdateMonitor();
+        }
     }
     ~MainWindow() {
         if (!demo_)
@@ -2544,8 +2719,10 @@ class MainWindow final {
         drafts_.reset();
         if (operation_.joinable())
             operation_.join();
-        if (service_)
+        if (service_) {
             service_->Stop();
+            service_->StopMonitoring();
+        }
         MSG message{};
         while (PeekMessageW(&message, window_, CompiledMessage, OperationMessage, PM_REMOVE)) {
             if (message.message == CompiledMessage)
@@ -2695,6 +2872,7 @@ class MainWindow final {
         ServiceDevice device;
         device.Name = "Preview GIP controller";
         device.Family = 6;
+        device.Telemetry = true;
         device.PhysicalValid = device.OutputValid = true;
         device.Values[0] = -20;
         device.Values[1] = 10;
@@ -2704,9 +2882,11 @@ class MainWindow final {
         for (std::size_t i = 0; i < 6; ++i)
             device.Available[i] = device.OutputAvailable[i] = true;
         device.Available[10] = device.OutputAvailable[10] = true;
+        device.InputAvailable = device.Available;
         device.Values[10] = device.OutputValues[10] = 100;
         snapshot_.Devices = {device};
         snapshot_.Running = true;
+        snapshot_.Monitoring = true;
         UpdateMonitor();
     }
 };
@@ -2743,10 +2923,26 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     };
     require(workspaceVisible(window_), "The offline test explicitly shows its application window");
     require(demo_ && !service_, "Offline UI never constructs a capture service or accesses the driver");
+    RequestMonitoring();
+    Command(MonitorAction, BN_CLICKED);
+    require(!service_ && !snapshot_.Monitoring,
+            "Offline observer actions never request elevation or create a driver reader");
+    SendMessageW(controls_[Live], BM_SETCHECK, BST_CHECKED, 0);
+    const auto monitorArguments = SessionArguments(directory / L"unsaved.igc", false);
+    const auto injectArguments = SessionArguments(directory / L"unsaved.igc", true);
+    require(monitorArguments.find(L"--session") != std::wstring::npos &&
+                monitorArguments.find(L"--inject") == std::wstring::npos &&
+                monitorArguments.find(L"--live-apply") == std::wstring::npos &&
+                injectArguments.find(L"--inject") != std::wstring::npos &&
+                injectArguments.find(L"--live-apply") != std::wstring::npos,
+            "Elevating live observation preserves the draft session without applying any script");
+    SendMessageW(controls_[Live], BM_SETCHECK, BST_UNCHECKED, 0);
     require(IsWindow(controls_[Code]) && IsWindow(controls_[Library]),
             "Native Windows code editor and library controls exist");
     require(SendMessageW(controls_[Monitor], EM_GETLIMITTEXT, 0, 0) >= 4 * 1024 * 1024,
             "The live monitor has room for every supported controller and all of its controls");
+    require((GetWindowLongPtrW(controls_[Monitor], GWL_STYLE) & ES_AUTOHSCROLL) != 0,
+            "Controller report rows cannot word-wrap OUT onto a separate visual line");
     const std::string initial = "// Exact source must survive mode changes.\nmain {\n}\n";
     SetSource(initial, {}, false);
     EnterVisual();
@@ -2972,24 +3168,109 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(SaveFile(false) && !std::filesystem::exists(recovery),
             "Saving a recovered script retires its consumed draft");
     ServiceDevice device;
+    device.Telemetry = true;
     device.PhysicalValid = device.OutputValid = true;
     device.OutputAvailable.fill(true);
     device.Available[32] = device.Available[159] = true;
+    device.InputAvailable = device.Available;
     device.Values[159] = -40;
     device.OutputValues[159] = 30;
     require(Values(device).find("AXIS_64    -40%   30% *") != std::string::npos,
-            "The monitor separates physical and accepted output for dynamic HID controls");
+            "The monitor separates physical IN and observed kernel OUT for dynamic HID controls");
     device.Available.fill(true);
     require(Values(device).find("VALUE_48") != std::string::npos &&
                 Values(device).find("BUTTON_64") != std::string::npos,
             "The monitor includes every available control instead of truncating after twelve");
     device.PhysicalValid = false;
-    require(Values(device).find("No values measured yet") != std::string::npos,
-            "An idle source is unknown until its first physical report, not a fabricated zero state");
-    device.PhysicalValid = true;
+    require(Values(device).find("AXIS_64      --   30%") != std::string::npos,
+            "OUT-only observations never fabricate physical IN values");
     device.OutputValid = false;
-    require(Values(device).find("--") != std::string::npos,
-            "An unaccepted output is not displayed as a successfully sent script result");
+    require(Values(device).find("No values measured yet") != std::string::npos,
+            "Idle IN and OUT remain unknown until measured, not fabricated zero states");
+    device.PhysicalValid = true;
+    require(Values(device).find("AXIS_64    -40%    --") != std::string::npos,
+            "A physical report does not imply an identical Windows-facing output");
+    device.OutputValid = true;
+    device.InputAvailable[159] = false;
+    require(Values(device).find("AXIS_64      --   30%") != std::string::npos,
+            "Partial HID reports retain validity separately for each direction and control");
+    device.InputAvailable[159] = true;
+    device.InputSequence = 5;
+    device.OutputSequence = 4;
+    device.InputTimestamp = 800;
+    device.OutputTimestamp = 600;
+    const auto timedValues = Values(device, 1000, 1000);
+    require(timedValues.find("IN #5  OUT #4") != std::string::npos &&
+                timedValues.find("IN 200 ms") != std::string::npos &&
+                timedValues.find("OUT 400 ms") != std::string::npos &&
+                timedValues.find("OUT predates latest IN") != std::string::npos,
+            "Live values identify report sequences, QPC age and an older egress observation");
+    device.Telemetry = false;
+    demo_ = false;
+    const auto submissionOnly = Values(device);
+    demo_ = true;
+    require(submissionOnly.find("AXIS_64      --    --") != std::string::npos &&
+                submissionOnly.find("No values measured yet") != std::string::npos,
+            "Accepted script submissions can never masquerade as kernel IN or Windows OUT");
+    device.Telemetry = true;
+    snapshot_.Devices = {device};
+    snapshot_.Running = false;
+    snapshot_.Monitoring = true;
+    snapshot_.MonitorStatus = "Read-only observer active";
+    snapshot_.MonitorDropped = 7;
+    UpdateMonitor();
+    require(Text(controls_[Monitor]).find(L"AXIS_64    -40%   30% *") != std::wstring::npos &&
+                diagnostic_.find("Script: stopped") != std::string::npos &&
+                diagnostic_.find("7 lost frames") != std::string::npos &&
+                diagnostic_.find("timestamp=800") != std::string::npos &&
+                Text(controls_[Monitor]).find(L"Telemetry lost: 7") != std::wstring::npos,
+            "Stopping a script leaves independent IN/OUT visible with copied timestamp and loss diagnostics");
+    device.Available.fill(false);
+    device.InputAvailable.fill(false);
+    device.OutputAvailable.fill(false);
+    device.Available[32] = device.InputAvailable[32] = device.OutputAvailable[32] = true;
+    device.Values[32] = 100;
+    device.OutputValues[32] = 0;
+    device.Name = "HID-compliant game controller";
+    snapshot_.Devices = {device};
+    UpdateMonitor();
+    bool singleReportLine = true;
+    std::ostringstream reportLineDetails;
+    for (const auto size : std::vector<POINT>{{1024, 768}, {910, 509}}) {
+        ResizePreview(size.x, size.y);
+        const auto monitorText = Text(controls_[Monitor]);
+        const auto first = monitorText.find(L"BUTTON_1");
+        const auto end = monitorText.find_first_of(L"\r\n", first);
+        const auto rowText = first != std::wstring::npos && end != std::wstring::npos
+                                 ? monitorText.substr(first, end - first)
+                                 : std::wstring{};
+        FINDTEXTEXW found{};
+        found.chrg = {0, -1};
+        found.lpstrText = rowText.c_str();
+        const auto match = SendMessageW(controls_[Monitor], EM_FINDTEXTEXW, FR_DOWN,
+                                       reinterpret_cast<LPARAM>(&found));
+        const auto row = SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
+                                     found.chrgText.cpMin);
+        const auto rowFirst = SendMessageW(controls_[Monitor], EM_LINEINDEX, row, 0);
+        const auto rowNext = SendMessageW(controls_[Monitor], EM_LINEINDEX, row + 1, 0);
+        reportLineDetails << " " << size.x << ":" << found.chrgText.cpMin << ","
+                          << found.chrgText.cpMax << "," << row << ","
+                          << rowFirst << "," << rowNext << ","
+                          << SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
+                                          found.chrgText.cpMax - 1);
+        singleReportLine = singleReportLine && match >= 0 && !rowText.empty() &&
+                           rowText.find(L"ON   OFF *") != std::wstring::npos &&
+                           SendMessageW(controls_[Monitor], EM_GETLINECOUNT, 0, 0) > row &&
+                           rowFirst == found.chrgText.cpMin &&
+                           rowNext >= found.chrgText.cpMax &&
+                           SendMessageW(controls_[Monitor], EM_EXLINEFROMCHAR, 0,
+                                        found.chrgText.cpMax - 1) == row;
+    }
+    require(singleReportLine,
+            "At 1024 pixels and the minimum desktop, BUTTON_1 IN and OUT occupy one actual RichEdit visual line" +
+                (singleReportLine ? std::string{} : reportLineDetails.str()));
+    ResizePreview(1440, 930);
+    snapshot_ = {};
     discardPrompt_ = nullptr;
     Preview(true);
     const auto beforePopup = source_;
@@ -3028,6 +3309,32 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(retained.cpMin == marked.cpMin && retained.cpMax == marked.cpMax,
             "Live detail updates preserve the reader's text selection");
     error_.clear();
+    // Published observer states can be exercised without constructing a service.
+    demo_ = false;
+    monitorAccessRequired_ = true;
+    snapshot_ = {};
+    UpdateMonitor();
+    Command(MonitorAction, BN_CLICKED);
+    require(!service_ && workspaceVisible(controls_[MonitorAction]) &&
+                Text(controls_[MonitorAction]) == L"Enable live IN / OUT" &&
+                Text(controls_[Monitor]).find(L"Administrator access required") != std::wstring::npos &&
+                IsWindowEnabled(controls_[Code]),
+            "The editor remains usable while one explicit action requests observer access");
+    monitorStarting_ = true;
+    monitorAccessRequired_ = false;
+    UpdateMonitor();
+    require(Text(controls_[MonitorAction]) == L"Connecting..." &&
+                !IsWindowEnabled(controls_[MonitorAction]) && IsWindowEnabled(controls_[Code]),
+            "Observer startup remains asynchronous and prevents duplicate connection requests");
+    monitorStarting_ = false;
+    monitorAccessRequired_ = false;
+    snapshot_.MonitorError = "Driver query failed: Windows error 2; compatible driver not installed.";
+    UpdateMonitor();
+    require(Text(controls_[MonitorAction]) == L"Retry live IN / OUT" &&
+                Text(controls_[Monitor]).find(L"Observer details") != std::wstring::npos &&
+                diagnostic_.find("Windows error 2") != std::string::npos &&
+                diagnostic_.find("compatible driver not installed") != std::string::npos,
+            "An unavailable observer exposes the exact error, retry and existing Driver setup action");
     bool bounded = true, separated = true;
     const auto beforeLayout = source_;
     const auto bounds = [this](HWND control) {
@@ -3037,6 +3344,7 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
         return area;
     };
     bool fieldsBounded = true;
+    std::ostringstream fieldBoundsDetails;
     for (const auto size :
          std::vector<POINT>{{1440, 930}, {1280, 800}, {1120, 720}, {960, 540}, {910, 509}}) {
         ResizePreview(size.x, size.y);
@@ -3070,6 +3378,9 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
             GetWindowRect(field.second, &area);
             MapWindowPoints(nullptr, form_, reinterpret_cast<POINT *>(&area), 2);
             fieldsBounded = fieldsBounded && area.left >= 0 && area.right <= formClient.right;
+            if (area.left < 0 || area.right > formClient.right)
+                fieldBoundsDetails << " " << size.x << ":" << field.first << "=" << area.left
+                                   << "," << area.right << "/" << formClient.right;
         }
     }
     require(bounded,
@@ -3077,7 +3388,11 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(separated,
             "Adaptive toolbars and session controls do not overlap on narrow or short desktops");
     require(fieldsBounded,
-            "Every visual property remains horizontally reachable in narrow and high-DPI workspaces");
+            "Every visual property remains horizontally reachable in narrow and high-DPI workspaces" +
+                (fieldsBounded ? std::string{} : fieldBoundsDetails.str()));
+    demo_ = true;
+    snapshot_ = {};
+    UpdateMonitor();
     ResizePreview(1536, 960, 144);
     RECT highDpi{};
     GetClientRect(window_, &highDpi);
