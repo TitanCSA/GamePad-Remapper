@@ -1,7 +1,10 @@
 # GamePad Remapper - Windows Controller Remapping, Scripts and Macros
 
-A **native C++ Windows application** for remapping gamepad controls, building
-timed macros and running complex **`.igc` scripts**. Edit behavior in code or
+A **complete C++ example application** showing how to use the
+[Interceptor Gamepad & Controller kernel filter driver](https://github.com/TitanCSA/Interceptor-Gamepad-Controller)
+and its SDK to build a real remapper. Use it as a ready-to-run tool or study its
+source to build your own. This **native C++ Windows application** remaps gamepad controls, builds
+timed macros and runs complex **`.igc` scripts**. Edit behavior in code or
 with visual rules, create script-specific settings, and inspect live controller
 **IN / OUT** state. Powered by the
 [Interceptor Gamepad & Controller kernel filter driver](https://github.com/TitanCSA/Interceptor-Gamepad-Controller).
@@ -14,6 +17,19 @@ with visual rules, create script-specific settings, and inspect live controller
 
 Screenshots show the native interface with simulated controller activity.
 Normal operation displays measurements from the driver.
+
+## Learn from the application
+
+The driver intercepts physical reports; this example processes scripts in user
+mode and returns modified input through the SDK. It does not install a second
+virtual-controller driver. The source demonstrates:
+
+- [Capture loop](App/Capture/Remapper.cpp): receive, decode, transform and forward input from the supported controller families.
+- [Application service](App/Capture/Service.cpp): manage capture from the interface and expose its state.
+- [Passive monitor](App/Capture/DriverMonitor.cpp): show measured IN / OUT states even without a running script.
+
+For a smaller starting point, use the driver's
+[five standalone controller examples](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/tree/main/ExamplesConsole).
 
 <a id="start"></a>
 
