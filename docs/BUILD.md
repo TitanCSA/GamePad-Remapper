@@ -41,14 +41,17 @@ Guard. AddressSanitizer is a separate validation configuration, not a release
 dependency. Offline tests do not create capture or install a driver. Explicit
 live tests additionally require a dedicated Hyper-V guest and laboratory opt-in.
 
-Packaging places only the application, examples, documentation and original
-signed-driver installer in `App/.build/dist/`, with SHA-256 checksums. The exact
+Packaging creates the portable ZIP, standalone application, driver installer
+under both its descriptive and legacy filenames, and `SHA256SUMS.txt` in
+`App/.build/dist/`. The ZIP contains the application, examples, documentation
+and original signed-driver installer. The exact
 driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-The seven CTest suites include the script-interface compiler/VM fixtures and
-concurrent parameter-publication checks. The offline UI test also exercises
+The nine CTest suites include the script-interface compiler/VM fixtures,
+concurrent parameter-publication checks and the actual capture worker against
+an isolated transport. The offline UI test also exercises
 custom controls, sidecar/fallback storage, workspace switching and DPI/resource
 lifetimes. Only `.igc` examples are packaged; personal `.igc.settings.json`
 values and recovery drafts are excluded.

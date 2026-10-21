@@ -24,12 +24,34 @@ std::string Utf8(const wchar_t *text) {
     result.pop_back();
     return result;
 }
+// std::system_category().message() uses the process ANSI code page on MSVC.
+// Keep the native error_code/category, but never append that byte string to a
+// UTF-8 diagnostic consumed by the UI's strict UTF-8 conversion.
+class WindowsFailure final : public std::system_error {
+    std::string text_;
+
+  public:
+    WindowsFailure(std::uint32_t code, const std::string &operation)
+        : std::system_error(static_cast<int>(code), std::system_category()) {
+        wchar_t *raw = nullptr;
+        const auto length = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                                              FORMAT_MESSAGE_IGNORE_INSERTS,
+                                          nullptr, code, 0, reinterpret_cast<LPWSTR>(&raw), 0, nullptr);
+        const std::unique_ptr<wchar_t, void (*)(wchar_t *)> message(
+            raw, [](wchar_t *value) { if (value) LocalFree(value); });
+        auto detail = length ? Utf8(raw) : "Windows error " + std::to_string(code);
+        while (!detail.empty() && (detail.back() == '\r' || detail.back() == '\n'))
+            detail.pop_back();
+        text_ = operation.empty() ? detail : operation + ": " + detail;
+    }
+    const char *what() const noexcept override { return text_.c_str(); }
+};
 GR_Snapshot NativeSnapshot() {
     GR_Snapshot result{};
     result.size = sizeof(result);
     const auto error = GR_GetSnapshot(&result);
     if (error)
-        throw std::system_error(static_cast<int>(error), std::system_category(), "Read capture status");
+        throw WindowsFailure(error, "Read capture status");
     if (result.version != 2)
         throw std::runtime_error("The capture engine version does not match this application.");
     return result;
@@ -172,13 +194,12 @@ void RemapperService::Inject(std::shared_ptr<const ScriptProgram> program,
     wchar_t text[1024]{};
     auto error = GR_Probe(text, 1024);
     if (error)
-        throw std::system_error(static_cast<int>(error), std::system_category(), Utf8(text));
+        throw WindowsFailure(error, Utf8(text));
     error = GR_Start(Impl::Transform, &self);
     if (error) {
         const auto failed = NativeSnapshot();
         const auto detail = Utf8(failed.error);
-        throw std::system_error(static_cast<int>(error), std::system_category(),
-                                detail.empty() ? "Capture could not start" : detail);
+        throw WindowsFailure(error, detail.empty() ? "Capture could not start" : detail);
     }
     self.started = true;
 }

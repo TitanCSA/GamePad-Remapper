@@ -1,5 +1,29 @@
 # Validation
 
+## 2.2.3 current driver integration
+
+This version uses the exact two-file Interceptor Gamepad & Controller SDK **1.0.4.1** and bundles the unchanged **1.0.6.1** installer with Microsoft-signed kernel **1.0.4.0**. Older sections below describe historical releases and their driver versions. The classic Interceptor product is unchanged.
+
+The application compiles and runs `.igc` code in user mode. The capture worker receives the real device report, applies the script, and returns it through `Send_Input`. Scheduled output uses the same captured source and saved physical report. XUSB runs below the Windows function driver, so native Windows translation receives the returned state; associated HID/XInputHID/GIP paths deliver the driver's modified reports. No per-process API hook or synthetic keyboard/mouse event is used.
+
+This scope covers supported reports on associated device stacks. It does not certify unfiltered sibling interfaces, direct vendor USB protocols, every firmware, wireless mode or consumer policy. Windows APIs also present different control layouts; for example, [Microsoft documents combined triggers in DirectInput for an XInput controller](https://learn.microsoft.com/en-us/windows/win32/xinput/xinput-and-directinput). A script cannot make an absent control appear in an API that does not expose it.
+
+The optimized native application passes all nine CTest suites and 81 native UI checks without opening the host driver. The production worker itself is exercised against an isolated transport: 25,685 checks cover 12,800 mixed reports, all five supported payload forms, forwarding order, timed output, physical-state restoration, failed sends and exact startup diagnostics. Service and worker tests also pass AddressSanitizer (10,072 and 25,685 checks). The interpreter stress suite evaluates 202,000 frames; its processing measurements describe software execution, not controller-to-application latency.
+
+Localized Windows failures retain their original error code and valid UTF-8 text. Regression tests cover accented messages and restart-required error 3010; the exact release application also displays that failure correctly in the French Windows test VM.
+
+Independent Windows consumers are tested with the exact release EXE, the Microsoft-signed kernel and controlled virtual XUSB/GIP controllers in an isolated Windows 11 VM. The real application opens and applies a real `.igc` script; consumer processes do not receive injected API results. The script changes stick axes and replaces A with B. Tests check baseline, Apply, Stop, reapply and forced application termination:
+
+- Edge's native Gamepad API: 342 matching stable samples per family. Analysis excludes 34 states per family within 400 ms of physical report transitions; no background or foreground-warmup frames are excluded.
+- Foreground Windows.Gaming.Input: 263 matching stable samples per family. Analysis explicitly separates 58 foreground warmup, 92 background and 56 report-transition query frames. Windows can neutralize readings after a focus change until another physical report arrives; these sparse-report tests do not establish focus-transition latency.
+- Actual `joy.cpl` property windows held in the foreground: all 54 XUSB and 52 GIP stable Apply/reapply images show the changed stick and button, including differing physical states. Baseline, Stop and forced termination restore the expected physical state (46 XUSB and 47 GIP stable images). Analysis waits 1.5 s after guarded focus changes and 400 ms after physical transitions when checking passthrough; it does not claim a latency bound. Separately, 92 stable XUSB samples in each of WinMM and DirectInput match the modified state.
+- Generic HID in Edge: 252 matching native states across baseline, Apply, Stop, reapply and forced termination. This fixture's descriptor exposes Y before X in the capture library; the script changes `AXIS_1`/`AXIS_2` and the browser receives the corresponding Y/X values and changed button. Expected axes come from the descriptor, not an assumption that `AXIS_1` always means X. Assertions use foreground steady event windows and are not latency measurements.
+
+The guarded live-service test also passes timed output during quiet input, additive figure-eight motion, invalid-source preservation, fault recovery, Stop and reinjection with virtual HID/GIP fixtures (122 distinct HID and 116 GIP motion points). Its output snapshots establish accepted driver sends; this is separate from independent consumer verification.
+
+Driver acceptance alone is not proof that a browser or game consumed a state. These are controlled virtual-device tests, not certification of every physical controller, firmware, application or vendor interface. Windows 10 physical hardware and end-to-end input latency were not measured.
+
+
 ## 2.2.2 installer selection and physical/output states
 
 Eight offline CTest suites pass in optimized Release and AddressSanitizer.

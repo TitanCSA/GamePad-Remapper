@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <system_error>
 #include <atomic>
 #include <thread>
 
@@ -18,11 +19,45 @@ bool exposeDevice = false;
 std::array<int, 256> lastOutput{};
 int lastWake = 0;
 std::uint32_t startError = 0;
+std::uint32_t probeError = 0, snapshotError = 0;
+std::wstring startCause = L"A precise injected startup cause";
 int starts = 0, stops = 0, checks = 0, parameterWakes = 0;
 void Check(bool condition, const char *reason) {
     ++checks;
     if (!condition)
         throw std::runtime_error(reason);
+}
+std::wstring StrictUtf16(const char *text) {
+    const auto length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, nullptr, 0);
+    Check(length > 0, "Windows diagnostics must pass the UI's strict UTF-8 conversion.");
+    std::wstring result(static_cast<std::size_t>(length), 0);
+    Check(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, result.data(), length) == length,
+          "Windows diagnostics must convert without substituting invalid bytes.");
+    result.pop_back();
+    return result;
+}
+template <class Operation> void WindowsDiagnostic(Operation operation, std::uint32_t code,
+                                                  const wchar_t *cause) {
+    bool caught = false;
+    try {
+        operation();
+    } catch (const std::system_error &error) {
+        caught = true;
+        Check(error.code().value() == static_cast<int>(code) &&
+                  error.code().category() == std::system_category(),
+              "UTF-8 display must preserve the original Win32 code and system category.");
+        const auto displayed = StrictUtf16(error.what());
+        wchar_t expected[4096]{};
+        const auto count = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                          nullptr, code, 0, expected, 4096, nullptr);
+        Check(count > 0, "The regression's Windows error must have a localized system message.");
+        std::wstring localized(expected, count);
+        while (!localized.empty() && (localized.back() == L'\r' || localized.back() == L'\n'))
+            localized.pop_back();
+        Check(displayed == std::wstring(cause) + L": " + localized,
+              "Accented causes and localized system messages must reach the UI exactly as Unicode.");
+    }
+    Check(caught, "The requested Windows failure must propagate as a system_error.");
 }
 int Invoke(std::uint32_t key, int input = 20, std::uint32_t flags = 0) {
     std::array<int, 256> physical{}, output{};
@@ -43,8 +78,8 @@ int Invoke(std::uint32_t key, int input = 20, std::uint32_t flags = 0) {
 } // namespace
 std::uint32_t __cdecl GR_Probe(wchar_t *message, std::uint32_t characters) {
     if (message && characters)
-        wcsncpy_s(message, characters, L"Test capture backend", _TRUNCATE);
-    return 0;
+        wcsncpy_s(message, characters, probeError ? startCause.c_str() : L"Test capture backend", _TRUNCATE);
+    return probeError;
 }
 std::uint32_t __cdecl GR_Start(GR_Callback cb, void *user) {
     ++starts;
@@ -55,7 +90,7 @@ std::uint32_t __cdecl GR_Start(GR_Callback cb, void *user) {
     snapshot.version = 2;
     exposeDevice = false;
     if (startError) {
-        wcscpy_s(snapshot.error, L"A precise injected startup cause");
+        wcscpy_s(snapshot.error, startCause.c_str());
         return startError;
     }
     callback = cb;
@@ -72,6 +107,8 @@ void __cdecl GR_Stop() {
 void __cdecl GR_Wake() {}
 void __cdecl GR_ParametersChanged() { ++parameterWakes; }
 std::uint32_t __cdecl GR_GetSnapshot(GR_Snapshot *output) {
+    if (snapshotError)
+        return snapshotError;
     if (!output || output->size != sizeof(*output))
         return ERROR_INVALID_PARAMETER;
     *output = snapshot;
@@ -220,6 +257,21 @@ int main() {
             precise = std::strstr(error.what(), "precise injected startup cause") != nullptr;
         }
         Check(precise && !service.IsRunning(), "Startup failures retain their actual published cause.");
+        for (const auto code : {static_cast<std::uint32_t>(ERROR_SUCCESS_REBOOT_REQUIRED),
+                                static_cast<std::uint32_t>(ERROR_ACCESS_DENIED)}) {
+            startCause = L"Red\u00e9marrage n\u00e9cessaire : p\u00e9riph\u00e9rique contr\u00f4l\u00e9";
+            startError = code;
+            WindowsDiagnostic([&] { service.Inject(counting); }, code, startCause.c_str());
+            Check(!service.IsRunning(), "A localized startup failure leaves no active capture.");
+            startError = 0;
+            probeError = code;
+            WindowsDiagnostic([&] { service.Inject(counting); }, code, startCause.c_str());
+            probeError = 0;
+            snapshotError = code;
+            WindowsDiagnostic([&] { (void)service.GetSnapshot(); }, code, L"Read capture status");
+            snapshotError = 0;
+        }
+        startCause = L"A precise injected startup cause";
         startError = 0;
         service.Inject(counting);
         Check(Invoke(1) == 1, "Startup failure leaves the service reusable.");

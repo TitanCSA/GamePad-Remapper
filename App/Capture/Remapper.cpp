@@ -93,6 +93,12 @@ DWORD Probe(std::wstring &message) {
             message = Explain(ERROR_REVISION_MISMATCH);
             return ERROR_REVISION_MISMATCH;
         }
+        if (!(caps.xusb_profiles & IC_PROFILE_XUSB_USB_FILTER)) {
+            message = L"The loaded Interceptor Gamepad Controller driver uses an older XUSB backend. "
+                      L"Run the bundled driver installer, restart Windows and reopen the installer "
+                      L"until association is complete, then inject again.";
+            return ERROR_REVISION_MISMATCH;
+        }
         const auto trial = Get_Trial_Status();
         if (trial.state == IC_TRIAL_EXPIRED) {
             message = Explain(IC_ERROR_TRIAL_EXPIRED);
@@ -511,9 +517,24 @@ class Service {
         DWORD startError = ERROR_GEN_FAILURE;
         try {
             const auto initialized = Init_AllDevices();
-            if (initialized.error)
+            if (initialized.error) {
+                std::string detail = "Initialize installed controller filters";
+                if (!initialized.error_detail.empty())
+                    detail += ": " + initialized.error_detail;
+                if (!initialized.error_device.empty()) {
+                    const auto &device = initialized.error_device;
+                    const int length = WideCharToMultiByte(CP_UTF8, 0, device.data(),
+                        static_cast<int>(device.size()), nullptr, 0, nullptr, nullptr);
+                    if (length > 0) {
+                        std::string instance(static_cast<std::size_t>(length), 0);
+                        WideCharToMultiByte(CP_UTF8, 0, device.data(), static_cast<int>(device.size()),
+                                            instance.data(), length, nullptr, nullptr);
+                        detail += " [" + instance + "]";
+                    }
+                }
                 throw std::system_error(initialized.error, std::system_category(),
-                                        "Initialize installed controller filters");
+                                        detail);
+            }
             if (initialized.reboot_required)
                 throw std::system_error(ERROR_SUCCESS_REBOOT_REQUIRED, std::system_category(),
                                         "Controller filters require a restart");

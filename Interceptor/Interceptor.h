@@ -22,7 +22,7 @@
 #define IC_SDK_SERVICE L"InterceptorGamepadController"
 #define IC_SDK_DOS_DEVICE L"\\\\.\\InterceptorGamepadController"
 
-// Interceptor SDK 1.0.4.0. Compile Interceptor.cpp once alongside your application.
+// Interceptor SDK 1.0.4.1. Compile Interceptor.cpp once alongside your application.
 // This header has no local-header dependencies. Windows x64, C++17.
 
 // ---- Interceptor.h ----
@@ -212,6 +212,7 @@ typedef struct IC_CREATE_RESULT { uint32_t version,count;uint64_t generation; } 
 #define IC_CAPABILITIES_VERSION 1u
 #define IC_PROFILE_XUSB_WIRED_028E 1u
 #define IC_PROFILE_XUSB_WIRED_COMPATIBLE 2u
+#define IC_PROFILE_XUSB_USB_FILTER 4u
 #define IC_PROFILE_XINPUTHID_GENERIC6 1u
 #define IC_PROFILE_GIP_USB_GAMEPAD14 1u
 #define IC_PROFILE_GIP_USB_GAMEPAD_RAW 2u
@@ -572,6 +573,10 @@ struct Init_Result {
     std::uint32_t associated=0,already_associated=0,skipped=0;
     DWORD error=ERROR_SUCCESS;
     std::vector<Init_Skip_Diagnostic> skipped_devices;
+    // First setup failure, including the operation and exact device when known.
+    // Empty on success. Reading input never performs this diagnostic work.
+    std::string error_detail;
+    std::wstring error_device;
 };
 struct Send_Result {
     std::size_t accepted=0;DWORD error=ERROR_SUCCESS;

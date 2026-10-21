@@ -1,122 +1,166 @@
 {
-    "Version":  "2.2.2",
+    "Schema":  2,
+    "Version":  "2.2.3",
     "Passed":  true,
-    "CreatedUtc":  "2026-10-20T15:34:49.5616258Z",
+    "CreatedUtc":  "2026-10-21T09:15:02.7332519Z",
     "Language":  "C++17",
     "Architecture":  "AMD64",
     "ApplicationCLR":  false,
+    "ApplicationSHA256":  "AC24457501083A1BA75999852948B25879D7601DFF300827124E25B740759144",
     "HostDriverOpened":  false,
     "PhysicalControllersTested":  false,
-    "DriverKernelVersion":  "1.0.2.0",
-    "SdkVersion":  "1.0.4.0",
-    "KernelCandidate":  "1.0.3.0",
-    "KernelSigningPending":  true,
+    "DriverKernelVersion":  "1.0.4.0",
+    "SdkVersion":  "1.0.4.1",
+    "DriverInstallerVersion":  "1.0.6.1",
+    "KernelSigningPending":  false,
     "ContentFolders":  [
                            "App",
                            "Scripts",
                            "docs",
                            "Interceptor"
                        ],
-    "Configurations":  [
-                           {
-                               "Configuration":  "Release223",
-                               "Passed":  true,
-                               "CTestSuites":  8,
-                               "UiChecks":  81,
-                               "CaptureChecks":  198240,
-                               "InstallerIdentityChecks":  10,
-                               "ServiceBoundaryChecks":  10034,
-                               "ParameterChecks":  10036,
-                               "Core":  {
-                                            "passed":  true,
-                                            "tests":  25,
-                                            "checks":  79279,
-                                            "stress_frames":  202000,
-                                            "vm_allocations":  0,
-                                            "reference_cases":  107,
-                                            "average_us":  0.788797,
-                                            "scope":  "native VM software cost, not hardware latency"
-                                        },
-                               "Visual":  {
-                                              "passed":  true,
-                                              "checks":  3667
-                                          },
-                               "Widgets":  {
-                                               "passed":  true,
-                                               "driver_access":  false,
-                                               "capture_started":  false,
-                                               "checks":  6046,
-                                               "lifetime_cycles":  100,
-                                               "dpi_cases":  [
-                                                                 96,
-                                                                 144,
-                                                                 192
-                                                             ],
-                                               "gdi_before":  27,
-                                               "gdi_after":  27,
-                                               "user_before":  20,
-                                               "user_after":  19,
-                                               "elapsed_ms":  2595.8699,
-                                               "scope":  "Hidden native controls, local control messages and offscreen painting only; no host input, capture service, driver, clipboard or file dialogs."
-                                           },
-                               "HostDriverOpened":  false,
-                               "CaptureStarted":  false
-                           },
-                           {
-                               "Configuration":  "Asan223",
-                               "Passed":  true,
-                               "CTestSuites":  8,
-                               "UiChecks":  81,
-                               "CaptureChecks":  198240,
-                               "InstallerIdentityChecks":  10,
-                               "ServiceBoundaryChecks":  10034,
-                               "ParameterChecks":  10036,
-                               "Core":  {
-                                            "passed":  true,
-                                            "tests":  25,
-                                            "checks":  79279,
-                                            "stress_frames":  202000,
-                                            "vm_allocations":  0,
-                                            "reference_cases":  107,
-                                            "average_us":  7.93169,
-                                            "scope":  "native VM software cost, not hardware latency"
-                                        },
-                               "Visual":  {
-                                              "passed":  true,
-                                              "checks":  3667
-                                          },
-                               "Widgets":  {
-                                               "passed":  true,
-                                               "driver_access":  false,
-                                               "capture_started":  false,
-                                               "checks":  6046,
-                                               "lifetime_cycles":  100,
-                                               "dpi_cases":  [
-                                                                 96,
-                                                                 144,
-                                                                 192
-                                                             ],
-                                               "gdi_before":  27,
-                                               "gdi_after":  27,
-                                               "user_before":  19,
-                                               "user_after":  19,
-                                               "elapsed_ms":  4188.8527,
-                                               "scope":  "Hidden native controls, local control messages and offscreen painting only; no host input, capture service, driver, clipboard or file dialogs."
-                                           },
-                               "HostDriverOpened":  false,
-                               "CaptureStarted":  false
-                           }
-                       ],
+    "Offline":  {
+                    "Passed":  true,
+                    "CTestSuites":  9,
+                    "UiChecks":  81,
+                    "DriverAccess":  false,
+                    "ProductionWorkerChecks":  25685,
+                    "MixedTransportReports":  12800,
+                    "Payloads":  [
+                                     "HID",
+                                     "XUSB",
+                                     "XInputHID",
+                                     "GIP",
+                                     "raw GIP"
+                                 ],
+                    "ServiceChecks":  10072,
+                    "CaptureCodecChecks":  198240,
+                    "SnapshotNotificationChecks":  30010,
+                    "ParameterChecks":  10036,
+                    "InstallerIdentityChecks":  10,
+                    "VisualChecks":  3667,
+                    "WidgetChecks":  6046,
+                    "Core":  {
+                                 "passed":  true,
+                                 "tests":  25,
+                                 "checks":  79279,
+                                 "stress_frames":  202000,
+                                 "vm_allocations":  0,
+                                 "reference_cases":  107,
+                                 "average_us":  0.823641,
+                                 "scope":  "native VM software cost, not hardware latency"
+                             }
+                },
+    "AddressSanitizer":  {
+                             "Passed":  true,
+                             "ProductionWorkerChecks":  25685,
+                             "ServiceChecks":  10072,
+                             "Scope":  "Production worker and service against an isolated transport; no driver access. This does not claim all nine suites were rerun under AddressSanitizer."
+                         },
     "VirtualMachine":  {
                            "Passed":  true,
-                           "UiChecks":  81,
-                           "ExactApplicationSHA256":  "BB7DCF4DF9722EE7A7ACFAB7AD99F58C0D61DDD20FD0C5F05EEF8D7C8FD661A8",
-                           "HidDistinctPatternPoints":  115,
-                           "GipDistinctPatternPoints":  110,
-                           "CandidateKernelBodyTested":  true,
-                           "CandidatePrivatelyDevelopmentSigned":  true,
-                           "CandidateIncludedInDownload":  false,
-                           "PhysicalBrowserTested":  false
+                           "Windows":  "Windows 11",
+                           "ExactReleaseApplication":  true,
+                           "MicrosoftSignedKernel":  true,
+                           "PhysicalHardware":  false,
+                           "GuiLocalizedRestartError":  {
+                                                            "Passed":  true,
+                                                            "Win32Error":  3010,
+                                                            "InvalidUtf8FalsePositive":  false
+                                                        },
+                           "BrowserGamepadApi":  {
+                                                     "Passed":  true,
+                                                     "Browser":  "Edge",
+                                                     "Families":  [
+                                                                      "XUSB",
+                                                                      "GIP"
+                                                                  ],
+                                                     "MatchingSamplesPerFamily":  342,
+                                                     "Stages":  [
+                                                                    "Baseline",
+                                                                    "Apply",
+                                                                    "Stop",
+                                                                    "Reapply",
+                                                                    "Forced application termination"
+                                                                ],
+                                                     "Scope":  "Native Edge Gamepad API using the default backend, foreground steady event windows. Thirty-four states per family within 400 ms of physical transitions are excluded. The passive, unstimulated VHF pad is not asserted. Not a latency measurement.",
+                                                     "Exclusions":  {
+                                                                        "PhysicalTransitionStatesPerFamily":  34,
+                                                                        "PhysicalTransitionStatesTotal":  68,
+                                                                        "ForegroundWarmup":  0,
+                                                                        "Background":  0
+                                                                    }
+                                                 },
+                           "WindowsGamingInput":  {
+                                                      "Passed":  true,
+                                                      "Families":  [
+                                                                       "XUSB",
+                                                                       "GIP"
+                                                                   ],
+                                                      "MatchingStableSamplesPerFamily":  263,
+                                                      "Exclusions":  {
+                                                                         "ForegroundWarmup":  58,
+                                                                         "Background":  92,
+                                                                         "PhysicalTransition":  56,
+                                                                         "Unit":  "Query frames, each containing both families"
+                                                                     },
+                                                      "Scope":  "Foreground stable states after the first new physical report and a 400 ms transition window. Raw focus-change neutralization retained; not a focus-transition or hardware-latency measurement."
+                                                  },
+                           "JoyCpl":  {
+                                          "Passed":  true,
+                                          "ActualWindows":  true,
+                                          "ForegroundVerified":  true,
+                                          "Xusb":  {
+                                                       "ModifiedStableImages":  54,
+                                                       "PhysicalBaselineImages":  14,
+                                                       "PhysicalAfterStopImages":  8,
+                                                       "PhysicalAfterForcedTerminationImages":  24,
+                                                       "AllForegroundCaptures":  189,
+                                                       "WrongStableImages":  0
+                                                   },
+                                          "Gip":  {
+                                                      "ModifiedStableImages":  52,
+                                                      "PhysicalBaselineImages":  13,
+                                                      "PhysicalAfterStopImages":  9,
+                                                      "PhysicalAfterForcedTerminationImages":  25,
+                                                      "AllForegroundCaptures":  190,
+                                                      "WrongStableImages":  0
+                                                  },
+                                          "XusbWinMmAndDirectInputMatchingModifiedSamplesPerApi":  92,
+                                          "Scope":  "Independent actual joy.cpl property windows with a controlled producer and the real release application. Steady intervals start 1.5 seconds after guarded foreground focus changes. Passthrough checks exclude the first 400 ms of physical transitions. One GIP missing-phase entry lies outside steady intervals. This is not a latency bound."
+                                      },
+                           "HidGipLiveService":  {
+                                                     "Passed":  true,
+                                                     "HidDistinctPatternPoints":  122,
+                                                     "GipDistinctPatternPoints":  116,
+                                                     "QuietInputScheduledOutput":  true,
+                                                     "AdditiveFigureEight":  true,
+                                                     "FaultRecovery":  true,
+                                                     "Scope":  "Actual application, compiler, capture service and signed driver with controlled virtual HID/GIP fixtures. Output snapshots prove accepted sends, not independent consumer reads."
+                                                 },
+                           "HidBrowser":  {
+                                              "Passed":  true,
+                                              "Consumer":  "Native Edge Gamepad API",
+                                              "Mapping":  "Generic HID, not standard XInput",
+                                              "MatchingStates":  252,
+                                              "Stages":  {
+                                                             "Baseline":  47,
+                                                             "Apply":  47,
+                                                             "Stop":  30,
+                                                             "Reapply":  48,
+                                                             "ForcedApplicationTermination":  80
+                                                         },
+                                              "Axis1Usage":  "Y",
+                                              "Axis2Usage":  "X",
+                                              "ScriptAxis1Percent":  50,
+                                              "ScriptAxis2Percent":  -25,
+                                              "ExpectedBrowserAxes":  [
+                                                                          -0.25,
+                                                                          0.5
+                                                                      ],
+                                              "BackgroundStatesExcluded":  0,
+                                              "Scope":  "Actual release GUI and descriptor-driven generic HID script with controlled VHF report ID 3, two signed 16-bit axes and eight buttons. Prespecified foreground steady event windows; not a latency or physical hardware certification."
+                                          }
                        },
-    "Scope":  "Offline compiler, conversion, service, installer selection, UI/storage/lifetime and sanitizer tests; exact release EXE with HID/GIP virtual fixtures in isolated Windows11 VM. Pending kernel candidate not shipped. No physical gamepad/browser/joy.cpl or end-to-end latency claim."
+    "Scope":  "Offline regression and sanitizer checks plus exact release EXE with controlled virtual fixtures in isolated Windows 11. No host driver opened. No universal physical-controller, application, firmware, Windows 10 or end-to-end latency guarantee."
 }
