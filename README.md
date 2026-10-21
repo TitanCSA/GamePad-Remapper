@@ -1,275 +1,166 @@
-# GamePad Remapper — Native C++ Controller Scripting & Macros
+# GamePad Remapper - Windows Controller Remapping, Scripts and Macros
 
-A desktop editor for controller remapping, compound triggers, continuous motion
-and timed macros in **`.igc` scripts**,
-powered by [Interceptor Gamepad & Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller),
-a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
+A **native C++ Windows application** for remapping gamepad controls, building
+timed macros and running complex **`.igc` scripts**. Edit behavior in code or
+with visual rules, create script-specific settings, and inspect live controller
+**IN / OUT** state. Powered by the
+[Interceptor Gamepad & Controller kernel filter driver](https://github.com/TitanCSA/Interceptor-Gamepad-Controller).
 
-**[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
-[IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
+**[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** |
+[IGC language](docs/LANGUAGE.md) | [Script settings](docs/SCRIPT-INTERFACE.md) |
+[Live IN / OUT](docs/LIVE-MONITOR.md) | [Build](docs/BUILD.md)
 
-**2.3.2:** `remap(A, B)` now keeps the physical **B** button usable: **A → B**
-and **B → B**. Multiple button sources combine without cancelling each other.
-Automatic **IN / OUT**, controller tabs and the searchable Scripts menu remain
-available. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
-**1.0.5.0** and SDK **1.0.4.2** are unchanged from 2.2.4.
-[Monitor details](docs/LIVE-MONITOR.md).
+![Script settings beside the tabbed IN / OUT inspector; simulated session](docs/images/script-settings.png)
 
-Two workspaces, **Use script** and **Edit script**. Script authors declare sliders, on/off switches, dropdowns and numeric fields in a `ui` block; players adjust them without touching the code. Settings are remembered per file and update a running script without recompilation or resetting its macros. [Create a script interface](docs/SCRIPT-INTERFACE.md).
+Screenshots show the native interface with simulated controller activity.
+Normal operation displays measurements from the driver.
 
-Scripts execute in the application. Captured reports are modified and returned through the kernel filter, feeding the associated device's native Windows input paths, including XInput and translated HID views for supported XUSB/GIP controllers. No per-game integration is required. Support depends on the captured transport and collection; vendor paths outside that filter and unsupported formats are not covered. See [low-level routing and validation](docs/VALIDATION.md).
+<a id="start"></a>
 
-![Script settings beside the tabbed controller IN / OUT inspector; simulated session](docs/images/script-settings.png)
+## Install and start
 
-Screenshots show the real native Windows interface with explicitly simulated controller
-activity. Normal use displays actual driver state and never invents devices.
+Requires **Windows 10/11 x64**. The application is a standalone C++ EXE, with no
+.NET runtime or application DLL dependency.
 
-<details>
-<summary>Script menu and code editor</summary>
+1. Download and extract the **GamePad-Remapper** Windows x64 ZIP.
+2. Run its **InterceptorGamepadControllerSetup.exe** and choose
+   **Install / reinstall**. If requested, use Windows **Restart**, then reopen
+   setup to finish device associations. **Driver setup** opens this same edition.
+3. Launch **GamePadRemapper.exe** and accept the administrator prompt. Controller
+   **IN / OUT observation starts automatically**, even without a script.
+4. Open **Scripts**, choose an example, adjust its settings in **Use script**,
+   then choose **Apply script** (**Ctrl+Enter**).
+5. Choose **Stop** to release capture and restore passthrough. Live observation
+   continues. Closing the application also releases capture.
 
-![Searchable Scripts popup with grouped examples and saved scripts](docs/images/script-library.png)
-
-![IGC code editor beside the live controller inspector; simulated session](docs/images/code-editor.png)
-
-</details>
-
-The interface uses **blue, black, white and gray**, with clear keyboard focus
-and short control animations. **Quick actions → Reduce interface motion**
-disables those animations; Windows' reduced-animation preference is respected.
-Drag the divider between the script and inspector to change their widths.
-Measured inputs update directly, without animated or interpolated values.
+For removal, stop the remapper and use the bundled driver installer's **Uninstall**.
+The controller driver is Microsoft-signed; this signature does not automatically
+sign the application EXE. [Driver setup and recovery](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/blob/main/docs/INSTALLATION.md).
 
 ## Two workspaces, one script
 
-- **Use script:** open **☰ Scripts**, choose a script, adjust its settings and apply it.
-  Sliders, switches, selections and numeric fields come directly from its `ui`
-  declaration. Parameter edits apply immediately to the active version, with
-  no Live apply switch required. **Reset settings** restores the author's defaults.
-- **Edit script:** author the behavior and its interface in **Code**, or use
-  the existing **Visual** designer. Switching workspace preserves the same file.
+| Workspace | Use it for |
+| --- | --- |
+| **Use script** | Choose a saved script and adjust its sliders, switches, dropdowns and numeric fields |
+| **Edit script** | Write IGC code or edit visual remaps, conditions, sequences and motion rules |
 
-- **Code:** a C-like language with `init`, `main`, variables, arrays, functions,
-  conditionals, loops, arithmetic, input events and timed `combo` sequences.
-- **Visual:** remap and axis cards; nested **ALL / ANY / NOT** triggers, holds,
-  double taps and axis thresholds; timed sequences or figure-eight, circle and
-  sine motion. Add the ready-to-edit infinity recipe with one click.
-  Advanced code is preserved when switching views.
-- **Scripts:** search examples and saved files in a grouped popup instead of a
-  permanent sidebar. The **…** menu holds **New script**, **Open file**,
-  **Save a copy**, the scripts folder and draft recovery when available.
-  Atomic saves keep the previous version as `.bak`; unsaved edits get recovery drafts.
-- **Apply script:** compile and apply behavior to captured controllers.
-  **Stop** releases capture. Applying a script updates user-mode behavior; it
-  does not load script code into the kernel or flash controller firmware.
-- **Fewer clicks:** automatic background validation, readable behavior summaries,
-  connected controls first in selectors, and optional **Live apply valid edits**.
-  Invalid edits keep the last working configuration.
-- **Live IN / OUT:** select a controller tab on the right. Each control has a
-  fixed row with its received **IN** and Windows-completed **OUT** beside it;
-  changed OUT values are blue and **—** means not measured. Axis bars and button
-  states update without rebuilding the text layout. Scroll to see additional
-  controls. Applying a script changes OUT; **Stop** restores passthrough and
-  leaves observation running. **Copy diagnostics** includes raw reports,
-  timestamps, counts and errors. OUT measures the driver's Windows completion
-  boundary; it does not confirm that every application has consumed the report.
+Both workspaces use the same `.igc` file. A script's `ui` block defines the
+settings shown in **Use script**. Parameter changes update an active script
+without recompilation or resetting its macros. **Reset settings** restores defaults.
 
-## Start
+The **Code** editor provides a C-like language with variables, arrays, functions,
+conditions, loops, input events and timed `combo` sequences. The **Visual** editor
+provides remap/axis cards, nested **ALL / ANY / NOT** conditions, holds, double
+taps, thresholds, timed sequences and figure-eight/circle/sine motion.
+Advanced code is preserved when switching views.
 
-Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
+Open **Scripts** for searchable examples and saved files. **Quick actions**
+provides new/open/save-copy operations, the scripts folder and available draft
+recovery. Use **Ctrl+S** to save. Optional **Live apply valid edits** updates an
+already-running capture; invalid edits keep the last working configuration.
 
-1. Download and extract `GamePad-Remapper-2.3.2-win-x64.zip`. The application is a single native C++ EXE.
-   The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
-2. Run **`InterceptorGamepadControllerSetup.exe`** from this ZIP to install or update the controller driver to **1.0.5.0**. If that kernel is already installed and its device associations are complete, continue to step 3. Older kernels cannot provide continuous IN / OUT telemetry.
-   **Driver setup** checks the installer's edition before launching it; a classic
-   Interceptor installer with the old shared filename will not be launched.
-   If requested, use Windows **Restart**, then reopen the installer to complete
-   device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
-3. Open **`GamePadRemapper.exe`** and approve the Windows administrator prompt
-   if shown. **IN / OUT starts automatically**, without applying a script.
-   If the driver is unavailable, the exact error is shown and observation
-   reconnects automatically. Select the controller's tab on the right, then open
-   **☰ Scripts** to choose an example. Use **… → New script** to start your own.
-   Editing and compiling work without an installed driver. Offline preview
-   (`--demo`) and script checking (`--check-script file.igc`) do not request elevation.
-4. In **Use script**, adjust the settings and choose **Apply script**
-   (**Ctrl+Enter**). Use **Edit script** to change the code or visual rules.
-   The driver restricts capture and telemetry to administrators; the normal
-   launch already requests those rights. Starting capture does not require moving a controller.
-5. Use **Stop** before another capture application. Closing this app also
-   releases capture and restores physical input passthrough.
+Scripts normally live in `Documents/GamePad Remapper/Scripts`, but files can be
+opened from any folder. Parameter values are stored beside a script in
+`.igc.settings.json`, with a user-profile fallback for read-only folders.
 
-Your library is stored in `Documents/GamePad Remapper/Scripts`. Settings are
-automatically saved in a neighboring `.igc.settings.json` file; keep it with the
-script to carry your values to another folder. Read-only folders use a local
-Windows user-profile fallback. Changing parameters leaves the
-`.igc` code untouched. You can open
-`.igc` files from any folder. Enable **Live apply valid edits** once per session
-to apply subsequent valid changes after a short editing pause. It only updates
-an already-running capture; opening a file or enabling the option never starts
-capture. **Ctrl+S** saves the script; recovery drafts do not replace that file.
+<a id="declare-your-own-settings"></a>
 
-## Declare your own settings
+## Create a script with its own settings
+
+This example uses standard XInput/GIP control names. It remaps the south button
+to the east button, applies a configurable deadzone and optionally inverts camera Y:
 
 ```c
 ui {
     title("My controller");
-    toggle enabled("Enable processing", true);
-    slider zone("Deadzone", 0, 99, 8, "%");
-    select mode("Camera mode", 0) {
-        0: "Normal";
-        1: "Invert vertical";
-    };
+    slider zone("Left-stick deadzone", 0, 99, 8, "%");
+    toggle invert_y("Invert camera Y", false);
 }
 
 main {
-    if (enabled) {
-        deadzone(LX, zone);
-        deadzone(LY, zone);
-        if (mode == 1) invert(RY);
-    }
+    remap(SOUTH, EAST);
+    deadzone(LX, zone);
+    deadzone(LY, zone);
+    if (invert_y) invert(RY);
 }
 ```
 
-The **Use script** workspace creates the controls automatically. Their names
-(`enabled`, `zone`, `mode`) are read-only integer values in the script. The
-deadzone builtin accepts `0..99`; other sliders can use `0..100` or another range.
-See the [complete customizable example](Scripts/10%20-%20Custom%20Script%20Interface.igc)
-and [interface reference](docs/SCRIPT-INTERFACE.md) for numeric fields, units,
-groups, help text, saved values and hot-update behavior.
+The physical east button remains usable: both sources can activate the destination.
+For generic HID controllers, use the displayed `BUTTON_1`, `AXIS_1`, `TRIGGER_1`
+and `HAT_1` controls; HID descriptors do not universally assign console button names.
+See the [script interface guide](docs/SCRIPT-INTERFACE.md) and
+[language reference](docs/LANGUAGE.md).
 
-## Complex behavior without a complex setup
+For complex behavior, combine conditions and actions or start from the included
+figure-eight example: hold two buttons while the camera axis exceeds a threshold,
+then add motion around the physical position of another stick. Code supports
+custom state and timed combos; visual rules support activation, deactivation,
+repeat and toggle modes. [Script examples](Scripts).
 
-In **Visual editor**, choose **∞ A + B → additive figure eight**, then
-**Apply script**. The recipe holds A + B (`SOUTH` + `EAST`) and checks
-that camera `RX > 50%`; it adds an infinity motion to `LX` / `LY` while that
-condition remains true. Adjust the two axes, width, height and cycle directly
-on the card. Generic HID controllers need their reported `BUTTON_n` / `AXIS_n`
-bindings instead of assumed button labels.
+## Live controller IN / OUT
 
-With physical `LX = 10%` and `LY = -20%`, those values are the moving center.
-Each evaluation starts from current physical input and adds the motion once:
-there is no accumulated drift. Moving the stick moves that center; releasing
-either button or dropping `RX` to `50%` stops the recipe on the next received
-input. Output stays within the axis limits. **Replace** can instead follow
-physical input, hold the position at activation, or use `(0, 0)` as its center.
+Select a controller tab on the right. Each control has a stable row showing
+physical **IN** beside the driver's **OUT**; changed OUT values are highlighted.
+Missing measurements appear as a dash. Scroll to inspect additional controls,
+or resize the script/inspector divider.
 
-Combine nested conditions, custom expressions, stateful functions and combos
-for other behaviors. Sequences support activation, repeat-while-true,
-deactivation and toggle modes; steps can **Add** or **Replace**. The code view
-remains available for logic beyond the visual cards.
+Observation is always active on normal launch and works independently of scripts.
+It reconnects when the driver becomes available. **Copy diagnostics** includes
+raw reports, timestamps, counts and errors. OUT measures successful completions
+towards Windows, not confirmation that every application consumed a report.
+[Measurement details](docs/LIVE-MONITOR.md).
 
-<details>
-<summary>The same additive figure eight as an IGC script</summary>
+## How remapping works
 
-```c
-define PERIOD = 1200;
-int active, origin;
+A worker captures supported physical reports, executes the compiled script and
+returns modified input through the kernel filter into the associated device's
+native Windows paths. Scripts execute in the application; applying one does not
+load script code into the kernel or flash controller firmware. No per-game
+integration is required for these supported input paths.
 
-main {
-    if (get_ival(SOUTH) && get_ival(EAST) && get_ival(RX) > 50 &&
-        is_available(LX) && is_available(LY)) {
-        if (!active) { origin = get_phase(PERIOD); active = 1; }
-        int phase = (get_phase(PERIOD) - origin + PERIOD) % PERIOD;
-        int angle = phase * 360 / PERIOD;
-        add_val(LX, sin(angle, 30));
-        add_val(LY, sin(angle * 2, 20));
-        tick(4);
-    } else active = 0;
-}
-```
+Compatibility follows the driver's transport, descriptor and protocol profiles,
+including supported **DS4 / DualShock 4, DualSense, wired Xbox 360 and Xbox One /
+Series** controllers. Unsupported vendor paths and proprietary formats are
+outside that scope. [Driver compatibility](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/blob/main/docs/COMPATIBILITY.md).
 
-`sin` uses degrees and returns an integer scaled by its second argument.
-`add_val` composes with existing output; with no earlier transform, that is the
-physical stick. `get_phase` uses monotonic time, so phase does not drift when
-Windows delivers a late tick. `tick(4)` requests updates only on this active
-path. See [the complete example](Scripts/07%20-%20Additive%20Figure%20Eight.igc)
-and [generic HID version](Scripts/08%20-%20Generic%20HID%20Orbit.igc).
+IGC is an original language inspired by GPC, with its own compiler and bounded
+runtime. It is not a drop-in implementation of every Cronus firmware API.
+The [language guide](docs/LANGUAGE.md) defines supported syntax and limits.
+Measured software costs and test scope are in [validation](docs/VALIDATION.md).
 
-</details>
+<a id="source-layout"></a>
 
-## A small IGC script
-
-```c
-define TAP_MS = 80;
-
-main {
-    // Native XInput / GIP controls. HID uses descriptor-based names below.
-    if (is_available(LY)) invert(LY);
-    if (event_press(SOUTH)) combo_run(DoubleTap);
-}
-
-combo DoubleTap {
-    set_val(EAST, 100); wait(TAP_MS);
-    set_val(EAST, 0);   wait(TAP_MS);
-    set_val(EAST, 100); wait(TAP_MS);
-    set_val(EAST, 0);   wait(TAP_MS);
-}
-```
-
-For a generic HID controller, use the displayed **`BUTTON_1`, `AXIS_1`,
-`TRIGGER_1`, `HAT_1`** and other descriptor-based controls. HID button usages do
-not universally identify A/Cross or B/Circle, so the app does not guess a brand
-layout from a product name. Only controls actually present on that controller
-can be changed. Script state is independent for each captured device. Wide
-binary fields and proprietary features outside the descriptor/protocol remain
-unchanged; arbitrary vendor checksums and hardware features are not emulated.
-
-IGC is an original language **inspired by GPC**, not the Cronus compiler or a
-drop-in implementation of every GPC firmware API. The
-[language reference](docs/LANGUAGE.md) describes supported syntax, timing,
-identifiers, limits and differences. Hardware-specific Cronus display, console
-authentication and device APIs are not simulated.
-
-## Driver compatibility and demo
-
-Support comes from the connected controller's **driver stack, descriptor and
-protocol**, including supported DS4/DualShock 4, DualSense, wired Xbox 360 and
-Xbox One/Series profiles. A matching brand name alone is not a compatibility
-guarantee. Unsupported bytes pass through unchanged. See the
-[driver compatibility guide](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/blob/main/docs/COMPATIBILITY.md).
-
-The signed driver is a **two-hour demo per Windows boot**, starting at the first
-successful capture and shared by applications using this driver edition.
-Closing or reinstalling does not reset it. At expiry, captures are revoked and
-physical input passes through normally. Use Windows **Restart** for a new
-allowance. Passive IN / OUT observation does not start or reset this timer; an
-already-active allowance continues while observing. For the unrestricted driver,
-DM **`titancsa`** on Discord.
-
-The remapper is open source under [MIT](LICENSE). Driver binary terms are
-[separate](DRIVER-BINARY-LICENSE.txt). The release includes the unmodified
-Microsoft-signed driver installer; the driver signature does not sign the
-remapper EXE. Kernel driver source and signing credentials are not published.
-
-## Performance and reliability
-
-Scripts compile once to bounded bytecode. A dedicated worker processes input
-outside the UI thread; timed work uses one-shot timers, and an idle script does
-not require a busy polling loop. The runtime limits instructions, stacks and
-arrays. Script faults release capture rather than keep a broken transform active.
-
-No software can promise zero latency or universal hardware support. Measured
-software costs, stress tests and signed-driver VM tests are recorded with their
-scope in [validation](docs/VALIDATION.md).
-
-Built by **TitanCSA**, using the independent
-[Interceptor Gamepad & Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller)
-project and the interception workflow popularized by
-[oblitum/Interception](https://github.com/oblitum/Interception). No affiliation with
-Cronus, oblitum, Microsoft, Sony or other controller manufacturers.
-
-## Source layout
-
-Only four content folders:
+## Source and build
 
 ```text
-App/          C++ application, UI, script engine, capture, tests and build tools
+App/          C++ application, UI, compiler, runtime, capture and tests
 Scripts/      Ready-to-edit .igc examples
-docs/         Documentation and screenshots
-Interceptor/  The original two-file C++ user-mode SDK
+docs/         Guides and screenshots
+Interceptor/  The two-file controller SDK
 ```
 
-Everything in the application is **C++17**, including the editor, visual model,
-compiler and runtime. Capture and the SDK are linked directly into the EXE.
-Build with `./Build.ps1`; generated files stay inside ignored `App/.build/`.
-See the [build instructions](docs/BUILD.md).
+Build with `powershell -ExecutionPolicy Bypass -File .\Build.ps1`.
+Everything in the application is C++17; the SDK is linked into the EXE.
+Generated files stay in ignored `App/.build/`. [Build instructions](docs/BUILD.md).
+
+Editing and compiling scripts work without an installed driver. Offline preview
+(`--demo`) and checking (`--check-script file.igc`) do not request elevation.
+Live capture and telemetry require administrator rights. Use **Quick actions >
+Reduce interface motion** to disable optional UI animations.
+
+## Driver demo and license
+
+The bundled controller driver allows **two hours of capture per Windows kernel
+boot**, starting with the first successful capture and shared across applications
+using that edition. Closing or reinstalling does not reset it. At expiry, capture
+stops and physical input passes through normally. Use Windows **Restart** for a
+new allowance. Passive IN / OUT observation does not start or reset this timer.
+For the unrestricted driver, DM **`titancsa`** on Discord.
+
+The remapper is [MIT-licensed](LICENSE); driver binaries have
+[separate terms](DRIVER-BINARY-LICENSE.txt). Kernel source and signing credentials
+are not published. Built by **TitanCSA**, using
+[Interceptor Gamepad & Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller)
+and the interception workflow popularized by
+[oblitum/Interception](https://github.com/oblitum/Interception). No affiliation with
+Cronus, oblitum, Microsoft, Sony or other controller manufacturers.
