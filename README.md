@@ -8,9 +8,10 @@ a Windows Kernel Filter Driver for HID, XInput/XUSB, XInputHID and GIP input.
 **[Download](https://github.com/TitanCSA/GamePad-Remapper/releases/latest)** ·
 [IGC language](docs/LANGUAGE.md) · [Build](docs/BUILD.md) · [Test results](docs/VALIDATION.md)
 
-**2.3.0:** a searchable **Scripts** popup, controller tabs, a stable **IN / OUT**
-inspector and an adjustable workspace. Live observation works without a loaded
-script. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
+**2.3.1:** **IN / OUT** observation starts automatically when the app opens,
+with automatic reconnection and no enable button. **Driver setup** is on the
+left and the searchable **☰ Scripts** menu is on the right. Clickable controls
+show a hand cursor. The bundled **1.0.7.0-demo** installer, Microsoft-signed kernel
 **1.0.5.0** and SDK **1.0.4.2** are unchanged from 2.2.4.
 [Monitor details](docs/LIVE-MONITOR.md).
 
@@ -76,22 +77,24 @@ Measured inputs update directly, without animated or interpolated values.
 
 Windows 10/11 **x64**. Native C++ application, with no .NET dependency.
 
-1. Download and extract `GamePad-Remapper-2.3.0-win-x64.zip`. The application is a single native C++ EXE.
+1. Download and extract `GamePad-Remapper-2.3.1-win-x64.zip`. The application is a single native C++ EXE.
    The ZIP includes example scripts and the driver installer; no .NET runtime or application DLLs are needed.
 2. Run **`InterceptorGamepadControllerSetup.exe`** from this ZIP to install or update the controller driver to **1.0.5.0**. If that kernel is already installed and its device associations are complete, continue to step 3. Older kernels cannot provide continuous IN / OUT telemetry.
    **Driver setup** checks the installer's edition before launching it; a classic
    Interceptor installer with the old shared filename will not be launched.
    If requested, use Windows **Restart**, then reopen the installer to complete
    device associations. See the [driver installation instructions](https://github.com/TitanCSA/Interceptor-Gamepad-Controller#quick-start).
-3. Open **`GamePadRemapper.exe`**. Choose **Enable live IN / OUT** to observe
-   controllers without applying a script; an elevated launch starts the monitor
-   automatically. Select the controller's tab on the right, then open
+3. Open **`GamePadRemapper.exe`** and approve the Windows administrator prompt
+   if shown. **IN / OUT starts automatically**, without applying a script.
+   If the driver is unavailable, the exact error is shown and observation
+   reconnects automatically. Select the controller's tab on the right, then open
    **☰ Scripts** to choose an example. Use **… → New script** to start your own.
-   Editing and compiling work without an installed driver or administrator rights.
+   Editing and compiling work without an installed driver. Offline preview
+   (`--demo`) and script checking (`--check-script file.igc`) do not request elevation.
 4. In **Use script**, adjust the settings and choose **Apply script**
    (**Ctrl+Enter**). Use **Edit script** to change the code or visual rules.
-   Approve Windows elevation when requested: the driver restricts capture to
-   administrators. Starting a capture does not require moving a controller.
+   The driver restricts capture and telemetry to administrators; the normal
+   launch already requests those rights. Starting capture does not require moving a controller.
 5. Use **Stop** before another capture application. Closing this app also
    releases capture and restores physical input passthrough.
 

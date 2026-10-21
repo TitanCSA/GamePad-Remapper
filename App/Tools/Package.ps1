@@ -2,7 +2,7 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.3.0'
+$version='2.3.1'
 $driverRelease='1.0.7.0-demo'
 $driverKernelVersion='1.0.5.0'
 $signedKernelSHA256='2d58e5aa6fcc50d10a2b8a350174dea1183ac688d8993471ef1105c6da4da3fa'

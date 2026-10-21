@@ -320,6 +320,19 @@ LRESULT CALLBACK ListProcedure(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (!state)
         return DefWindowProcW(window, message, w, l);
     switch (message) {
+    case WM_SETCURSOR:
+        if (reinterpret_cast<HWND>(w) == window && LOWORD(l) == HTCLIENT && IsWindowEnabled(window)) {
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(window, &point);
+            const int y = point.y + state->Scroll;
+            const bool item = std::any_of(state->Rows.begin(), state->Rows.end(), [y](const auto &row) {
+                return row.Entry && y >= row.Top && y < row.Top + row.Height;
+            });
+            SetCursor(LoadCursorW(nullptr, item ? IDC_HAND : IDC_ARROW));
+            return TRUE;
+        }
+        break;
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: state->Paint(window, true); return 0;
     case WM_PRINTCLIENT: state->Paint(window, true, reinterpret_cast<HDC>(w)); return 0;
@@ -515,7 +528,11 @@ std::optional<std::size_t> ShowScriptLibraryPopup(
                               static_cast<int>(std::min<std::size_t>(groups, 10)) * 29;
     const int height = std::max(1, std::min<int>(state.S(std::clamp(desiredHeight, 235, 540)),
                                            work.bottom - work.top - 2 * margin));
-    const int x = std::clamp<int>(button.left, work.left + margin, std::max(work.left + margin, work.right - width - margin));
+    RECT ownerArea{};
+    GetClientRect(owner, &ownerArea);
+    MapWindowPoints(owner, nullptr, reinterpret_cast<POINT *>(&ownerArea), 2);
+    const int aligned = button.left + width > ownerArea.right ? button.right - width : button.left;
+    const int x = std::clamp<int>(aligned, work.left + margin, std::max(work.left + margin, work.right - width - margin));
     int y = button.bottom + state.S(6);
     if (y + height > work.bottom - margin && button.top - state.S(6) - height >= work.top + margin)
         y = button.top - state.S(6) - height;

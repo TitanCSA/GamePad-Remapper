@@ -717,6 +717,24 @@ LRESULT CALLBACK Procedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_P
         return nativeResult;
     };
     try {
+        if (message == WM_SETCURSOR && reinterpret_cast<HWND>(w) == window && IsWindowEnabled(window)) {
+            const auto hit = LOWORD(l);
+            bool clickable = state->Kind == ControlKind::Button || state->Kind == ControlKind::Check ||
+                             state->Kind == ControlKind::Combo;
+            if (!clickable && hit == HTCLIENT && state->Kind != ControlKind::Edit) {
+                wchar_t kind[32]{};
+                GetClassNameW(window, kind, 32);
+                clickable = _wcsicmp(kind, L"ListBox") == 0 || _wcsicmp(kind, L"ComboLBox") == 0 ||
+                            _wcsicmp(kind, WC_TREEVIEWW) == 0 || _wcsicmp(kind, TRACKBAR_CLASSW) == 0 ||
+                            (_wcsicmp(kind, L"Static") == 0 &&
+                             (GetWindowLongPtrW(window, GWL_STYLE) & SS_NOTIFY) != 0);
+            }
+            if ((hit == HTCLIENT && clickable) ||
+                (state->Scrollbars && (hit == HTVSCROLL || hit == HTHSCROLL))) {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+        }
         if (message == WM_PRINT) {
             const auto result = native();
             if (!state->Destroyed && (l & PRF_NONCLIENT) != 0)
@@ -918,6 +936,8 @@ void StyleComboBox(HWND window) {
         StyleEdit(info.hwndItem);
         Get(info.hwndItem)->EmbeddedEdit = true;
     }
+    if (GetComboBoxInfo(window, &info) && info.hwndList)
+        Get(info.hwndList);
     Repaint(window);
 }
 void StyleEdit(HWND window) {

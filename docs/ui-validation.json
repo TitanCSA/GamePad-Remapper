@@ -1,56 +1,64 @@
 {
     "Schema":  1,
     "Passed":  true,
-    "Version":  "2.3.0",
-    "CreatedUtc":  "2026-10-21T12:38:55.6424801Z",
-    "ComparedWithCommit":  "05e76b5ba0e77350638426faf193f463150e6737",
+    "Version":  "2.3.1",
+    "CreatedUtc":  "2026-10-21T13:06:31.6766534Z",
+    "ComparedWithCommit":  "a82d0fc107ab70fdc48370f19845784dad4bc9ae",
     "Scope":  "Native Windows UI and isolated software fixtures. No physical controller, host input, driver or VM was opened. Not a physical latency or compatibility measurement.",
     "HostDriverOpened":  false,
     "CaptureStarted":  false,
     "VmAccessed":  false,
     "PhysicalControllerTested":  false,
-    "ProductionExecutableSHA256":  "8e63634abd6c68c4ac01df7fb21509434df7887b02e5365f87d72c46f1c06bc1",
+    "AutomaticMonitoring":  {
+                                "NormalStartupRequestsElevation":  true,
+                                "EnableButtonRemoved":  true,
+                                "RetryIntervalMilliseconds":  3000,
+                                "HealthyOrStartingMonitorNeverRestarted":  true,
+                                "OfflineDecisionAndArgumentTestsPassed":  true,
+                                "InteractiveUacLaunchTested":  false
+                            },
+    "ProductionExecutableSHA256":  "e3bef79d7759e78d4248231c06382935089aa32c363eac33ae512ebc971cfe5e",
     "AsanToolset":  "14.44.35207",
     "Builds":  [
                    {
-                       "Configuration":  "Release230",
+                       "Configuration":  "Release231",
                        "Passed":  true,
                        "CtestSuites":  13,
-                       "NativeUiChecks":  95,
+                       "NativeUiChecks":  99,
                        "ControllerViewChecks":  40,
-                       "ScriptLibraryChecks":  72,
+                       "ScriptLibraryChecks":  75,
                        "ScriptPanelChecks":  196,
-                       "WidgetChecks":  6128,
+                       "WidgetChecks":  6139,
                        "WidgetLifetimeCycles":  100,
                        "WidgetDpiCases":  [
                                               96,
                                               144,
                                               192
                                           ],
-                       "UiReportSHA256":  "a75ed201dfad190af85d3008af0b99bd6925a13824f944d3eed7831cb25716cf",
-                       "CTestLogSHA256":  "381bd0b75f7fe20d1c9eb2a31af0e27f1c86d204797ac212370a94a928903524",
-                       "WidgetReportSHA256":  "39600164f12d943f2bdbd47a75a5df0d1522bdd12246796210bf4bef41c6de8b",
-                       "ExecutableSHA256":  "8e63634abd6c68c4ac01df7fb21509434df7887b02e5365f87d72c46f1c06bc1"
+                       "UiReportSHA256":  "2fb2231d725cb022c40843eaa7bae08e4fa3da3931a166b9b1f0282deb7c01e2",
+                       "CTestLogSHA256":  "6b52ed72e5d4345aa5eef560a626aa71c6a5d9af98004abf1597b751925c848a",
+                       "WidgetReportSHA256":  "974cde48b246c563ec9e6a922cd15cdda15630eb976e75635ad4137ebf0a6645",
+                       "ExecutableSHA256":  "e3bef79d7759e78d4248231c06382935089aa32c363eac33ae512ebc971cfe5e"
                    },
                    {
-                       "Configuration":  "Asan230",
+                       "Configuration":  "Asan231",
                        "Passed":  true,
                        "CtestSuites":  13,
-                       "NativeUiChecks":  95,
+                       "NativeUiChecks":  99,
                        "ControllerViewChecks":  40,
-                       "ScriptLibraryChecks":  72,
+                       "ScriptLibraryChecks":  75,
                        "ScriptPanelChecks":  196,
-                       "WidgetChecks":  6128,
+                       "WidgetChecks":  6139,
                        "WidgetLifetimeCycles":  100,
                        "WidgetDpiCases":  [
                                               96,
                                               144,
                                               192
                                           ],
-                       "UiReportSHA256":  "4729a78811f212e41ecc580de84395a8b267648012d88794ea503aed0bdd1758",
-                       "CTestLogSHA256":  "a29ac816ec6324d7ab5f12846145142f82edbc32291f3b967222ad2658ec7284",
-                       "WidgetReportSHA256":  "60b2744e0ea86d49977a53f93444960cbc2e00b25c7f7c8685433f0778d78407",
-                       "ExecutableSHA256":  "820c7e1c7e5075b653a6a777330e9bdcfb4100d97062438fc4d86773c1321470"
+                       "UiReportSHA256":  "db69d21022cb7be645e4e0494fcb2febe27047e91c03275cf88d63e93def563b",
+                       "CTestLogSHA256":  "87334aa9a6c800faf8949e5ee948a0f046ada281091de74b98d93f3062cbd724",
+                       "WidgetReportSHA256":  "b9684845f8d25337600047b112e77e3d8e6c9d0148ed3d70442abfb08ae88c02",
+                       "ExecutableSHA256":  "b33c9d9705b7c1c5efe85736c7fafdb8bb9809a401dc425f7f43e1124690da9a"
                    }
                ],
     "ControllerStress":  {
@@ -75,19 +83,19 @@
     "SourceHashes":  [
                          {
                              "Path":  "CMakeLists.txt",
-                             "SHA256":  "e6d5275924e62585b8e6450d478a9a815ced7951ac6fe0b05c45be5e1496183d"
+                             "SHA256":  "396e0e9866a32d3307a9f9d9655ad8c323b30aea492895d9503ebb2870b0e795"
                          },
                          {
                              "Path":  "App/App.rc",
-                             "SHA256":  "95d64a65903ce3056cff404ba6471fb707b4ed80a04f1979b219f050760e9f46"
+                             "SHA256":  "939405ca1e192e52d858c6740287763ca2b0c67a7c7aa58449ba3710daffa6f4"
                          },
                          {
                              "Path":  "App/app.manifest",
-                             "SHA256":  "8649a267d7aa7be8f75333443f1cfa45adb71d51216e9f52c18310248e67bfb7"
+                             "SHA256":  "330ba65cb948043c0df3d24c0da215052e52a6c278d3746e2eb4d61f0f61d942"
                          },
                          {
                              "Path":  "App/UI/ControllerMonitorView.cpp",
-                             "SHA256":  "6d0838bd7368af705952a156c17ba8500de45f65231afe872cca4c0638214fce"
+                             "SHA256":  "3d5f2cb67bf3bccdeaa2e326d94d6f86873919d5e888acf25d8749ce30c72f95"
                          },
                          {
                              "Path":  "App/UI/ControllerMonitorView.h",
@@ -103,7 +111,7 @@
                          },
                          {
                              "Path":  "App/UI/MainWindow.cpp",
-                             "SHA256":  "861034f378cf696ef05c09a78ece872ca5cad65da5c01fbb2f011c01a8d040ae"
+                             "SHA256":  "02e76df20fe6efeabbf43a4ff79ffc37279b3c77548812d4d44fee4692050748"
                          },
                          {
                              "Path":  "App/UI/MainWindow.h",
@@ -111,7 +119,7 @@
                          },
                          {
                              "Path":  "App/UI/NativeWidgets.cpp",
-                             "SHA256":  "4c126e8a3bb1fc74a70dbdc00538f3faccb2e1c5fe7bbc4a4c26078cd7edf56f"
+                             "SHA256":  "ca299a15df729542af22729196ce0163bc34792b2f8ed8ef3f0ba7884f4fab7c"
                          },
                          {
                              "Path":  "App/UI/NativeWidgets.h",
@@ -119,7 +127,7 @@
                          },
                          {
                              "Path":  "App/UI/ScriptLibraryPopup.cpp",
-                             "SHA256":  "6c71e2c85c9bcabc85932e85f1c18f518906ad923a74f4b41cd878cf581c3306"
+                             "SHA256":  "0715b933cdca13b3c88228bf7cde25081cddd297df2af9d70fb0c98cc18f5582"
                          },
                          {
                              "Path":  "App/UI/ScriptLibraryPopup.h",
@@ -195,7 +203,7 @@
                          },
                          {
                              "Path":  "App/Tests/ScriptLibraryPopupTests.cpp",
-                             "SHA256":  "db72badaa19415fafb56c40722738ddf4bd4a3aa1149a45c17bb88ca002b2480"
+                             "SHA256":  "3604cfafcb3ae5433cbe74aa0ac4cb201fb9868fb7ec6272beb6386e11fcb805"
                          },
                          {
                              "Path":  "App/Tests/ScriptPanelTests.cpp",
@@ -219,7 +227,7 @@
                          },
                          {
                              "Path":  "App/Tests/WidgetTests.cpp",
-                             "SHA256":  "f4b2681a128e2e2829198a8a47b4589e5874a666cdf6852e05db54d92d6c2386"
+                             "SHA256":  "adc64c59297c523bb5b62c7d8a4f595a9d1ba065b13a7ba52c94ae2db447dc89"
                          },
                          {
                              "Path":  "App/Tests/WorkerTests.cpp",
@@ -229,17 +237,17 @@
     "Screenshots":  [
                         {
                             "Path":  "docs/images/code-editor.png",
-                            "SHA256":  "2e199570f432a040a80614231f60f563330fd6a369400a7010a60ea109c5374f",
+                            "SHA256":  "423c24bedd463b537c36d00d7e85ad58fe48ed00ee1046f832a04603fbab5bbb",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/compact-layout.png",
-                            "SHA256":  "763dc1e3a88b713aadc0e9e5101f29c6eed4a0b655bd895cf4b82a9c1f822bc4",
+                            "SHA256":  "3e6816c35977df4607e92110969cffaafc63397182997c0118ab0ba4833827cb",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/controller-states.png",
-                            "SHA256":  "8d33211c0267fa0e2d3ef4e9d335dabcc6efeeb931f7afdf7f572fdaf06f000d",
+                            "SHA256":  "462993ec8f1da680e29e8889843c7fd668429610307ce711143ccc6b40ec99ca",
                             "Simulated":  true
                         },
                         {
@@ -249,42 +257,42 @@
                         },
                         {
                             "Path":  "docs/images/dpi-150.png",
-                            "SHA256":  "c7eba08cb7e435caefcca9a387e8d4502549b56a1ce8f79717aad783efcaced8",
+                            "SHA256":  "7a25e2d4e300c84b53f7501bb8588ad9e791b1559d67902e20e6610f9b90e962",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/dropdown-state.png",
-                            "SHA256":  "99b229abb85c0d0bbd4add30a3b83c4b3431d0c1109461f27cfbeae27db25f23",
+                            "SHA256":  "2362ee784aee4652eca76a2331e998d0ddfc63e6eb59d68f32df8a1cf0534ae9",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/macro-editor.png",
-                            "SHA256":  "d689cea2e2f72c8b38e6a6dfe54451c91f73b0d32f0215656c892a2012f26d98",
+                            "SHA256":  "64d25b6f66555c21e0f9954f46f5c2814d1ac06622b038b24d997bfa4654d2bd",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/minimum-layout.png",
-                            "SHA256":  "6038a7ef14f8b581455414d7f23ae81938fd3b8f985c3dbf013fc7863630875e",
+                            "SHA256":  "189325fb0913b50e280b5d8cf6e8d71cd3d9bce1c2e6df24ddb24e75ff5f02e2",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/motion-settings.png",
-                            "SHA256":  "958524fee3f646a25d6b1bf5bb3c779d841216f928daaa8fa9691656d82f3b42",
+                            "SHA256":  "9f34366cbdedc94207a000b6c56b93480d5efa10b9891e3a53ff101458fced75",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/script-library.png",
-                            "SHA256":  "04fd7de6288d4a559da78743e9e2f982a0cc23b4de162de70af62fc5c48a12ba",
+                            "SHA256":  "a9886d354ca2c5f3e9f64296219b03273607bc18e8933448b27408494fa79cb2",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/script-settings.png",
-                            "SHA256":  "8d33211c0267fa0e2d3ef4e9d335dabcc6efeeb931f7afdf7f572fdaf06f000d",
+                            "SHA256":  "08b3690cb16d73f2a6e8085483979c5433ce0081825c2ab8d42d6160ba80fe2a",
                             "Simulated":  true
                         },
                         {
                             "Path":  "docs/images/visual-editor.png",
-                            "SHA256":  "58e13ff8ca485ab79b28f03379c98710cb7221e5838dab6cff22f46a2d0fcc57",
+                            "SHA256":  "ca9a2a13c97742be813bf28f56dea4d35d920a1788014f155ba704df40bcb899",
                             "Simulated":  true
                         }
                     ]

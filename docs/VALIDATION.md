@@ -1,5 +1,29 @@
 # Validation
 
+## 2.3.1 automatic observation and controls
+
+Normal interactive startup requests administrator rights before opening the
+window and starts passive IN/OUT observation automatically. There is no enable
+or retry button. The existing health timer retries failed connections at most
+once every three seconds; a healthy or starting monitor is never restarted.
+Missing-driver errors remain visible and copyable. Observation does not apply a
+script or start the capture trial. Offline preview, compilation and tests remain
+outside this startup path.
+
+The toolbar places Driver setup on the left and Scripts on the right. The
+Scripts popup opens toward the left when needed. Enabled interactive controls
+use the hand cursor; text editing keeps its text cursor and the divider keeps
+its resize cursor.
+
+All 13 CTest suites and 99 native UI checks pass in Release and AddressSanitizer.
+The widget suite includes 11 new cursor checks. UI checks cover startup privilege
+decisions, lossless Windows argument quoting, bounded reconnect scheduling,
+monitor failure diagnostics and toolbar order. Popup tests cover right-edge
+alignment. No UAC prompt was accepted, host driver opened or live capture started
+by these offline tests. Current inputs, results and scope are recorded in
+[ui-validation.json](ui-validation.json). The signed driver and capture worker
+are unchanged; the earlier live test results below retain their original scope.
+
 ## 2.3.0 interface
 
 The native interface uses a searchable, grouped Scripts popup, separate controller
@@ -27,7 +51,7 @@ The native UI test covers script use/edit transitions, unsaved changes, menu
 discovery, multiple simulated controllers, diagnostic formatting on demand,
 compact/minimum layouts and high DPI. Rendered documentation images explicitly
 use simulated input. Current build hashes and scope are recorded in
-[ui-validation.json](ui-validation.json).
+[ui-validation.json for 2.3.0](https://github.com/TitanCSA/GamePad-Remapper/blob/v2.3.0/docs/ui-validation.json).
 
 The capture worker, SDK and driver package are unchanged from 2.2.4. This update
 does not open a host driver, install a driver or repeat the live VM/consumer

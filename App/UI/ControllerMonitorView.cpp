@@ -256,6 +256,14 @@ void DrawTabs(HDC dc, State &state, const RECT &client) {
     }
 }
 LRESULT CALLBACK TabProcedure(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR ref) {
+    if (message == WM_SETCURSOR && reinterpret_cast<HWND>(w) == window && LOWORD(l) == HTCLIENT &&
+        IsWindowEnabled(window)) {
+        TCHITTESTINFO hit{};
+        GetCursorPos(&hit.pt);
+        ScreenToClient(window, &hit.pt);
+        SetCursor(LoadCursorW(nullptr, TabCtrl_HitTest(window, &hit) >= 0 ? IDC_HAND : IDC_ARROW));
+        return TRUE;
+    }
     auto *state = reinterpret_cast<State *>(ref);
     if (message == WM_ERASEBKGND) return 1;
     if (message == WM_PAINT || message == WM_PRINTCLIENT) {

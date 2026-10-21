@@ -18,7 +18,7 @@ struct Window {
     HWND Value = nullptr;
     ~Window() { if (IsWindow(Value)) DestroyWindow(Value); }
 };
-enum class Action { Search, Down, Up, Escape, NoMatches, Outside, Anchor, Close, Tabs, OutsideFocus, PaintTraffic, ScrollPosition, TopEscape, CancelCommand, Geometry };
+enum class Action { Search, Down, Up, Escape, NoMatches, Outside, Anchor, Close, Tabs, OutsideFocus, PaintTraffic, ScrollPosition, TopEscape, CancelCommand, Geometry, RightAlignment };
 struct Automation {
     HWND Owner = nullptr, Anchor = nullptr;
     Action Kind = Action::Escape;
@@ -69,6 +69,14 @@ void CALLBACK Automate(HWND owner, UINT, UINT_PTR timer, DWORD) {
     UpdateWindow(popup);
     UpdateWindow(list);
     switch (active->Kind) {
+    case Action::RightAlignment: {
+        RECT area{}, button{};
+        GetWindowRect(popup, &area);
+        GetWindowRect(active->Anchor, &button);
+        active->GeometryHonoured = area.right == button.right && area.left < button.left;
+        SendMessageW(popup, WM_CLOSE, 0, 0);
+        break;
+    }
     case Action::Search:
         SetWindowTextW(search, L"MY turbo");
         SendMessageW(search, WM_KEYDOWN, VK_RETURN, 0);
@@ -276,6 +284,12 @@ int wmain() {
         Check(!Show(owner.Value, anchor.Value, entries, {}, Action::Geometry, nullptr, nullptr, nullptr,
                     nullptr, nullptr, &geometryHonoured), "Resizing or DPI change selected a script.");
         Check(geometryHonoured, "Rounded popup fallback was lost after resizing or changing DPI.");
+        MoveWindow(anchor.Value, 440, 16, 160, 40, FALSE);
+        bool rightAligned = false;
+        Check(!Show(owner.Value, anchor.Value, entries, {}, Action::RightAlignment, nullptr, nullptr, nullptr,
+                    nullptr, nullptr, &rightAligned), "Right-edge menu placement selected a script.");
+        Check(rightAligned, "A right-edge Scripts button must open its menu toward the left, aligned to the button.");
+        MoveWindow(anchor.Value, 16, 16, 160, 40, FALSE);
 
         // Repeated creation/destruction checks native handles, not driver state.
         const auto baseline = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);

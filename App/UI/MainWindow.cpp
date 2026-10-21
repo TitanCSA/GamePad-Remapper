@@ -78,8 +78,7 @@ enum Id {
     RemoveStep,
     UpStep,
     DownStep,
-    MonitorAction = 140,
-    ScriptActions,
+    ScriptActions = 140,
     Property = 1000
 };
 enum Field {
@@ -126,13 +125,42 @@ void SetText(HWND window, const std::wstring &text) {
     if (Text(window) != text)
         SetWindowTextW(window, text.c_str());
 }
-std::wstring Quote(const std::wstring &value) { return L"\"" + value + L"\""; }
+std::wstring Quote(const std::wstring &value) {
+    std::wstring result = L"\"";
+    std::size_t slashes = 0;
+    for (const auto character : value) {
+        if (character == L'\\') {
+            ++slashes;
+            continue;
+        }
+        result.append(character == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+        result += character;
+        slashes = 0;
+    }
+    result.append(slashes * 2, L'\\');
+    return result + L'"';
+}
 std::wstring Argument(const std::vector<std::wstring> &args, const std::wstring &option) {
     const auto it = std::find(args.begin(), args.end(), option);
     return it != args.end() && std::next(it) != args.end() ? *std::next(it) : L"";
 }
 bool Has(const std::vector<std::wstring> &args, const std::wstring &value) {
     return std::find(args.begin(), args.end(), value) != args.end();
+}
+bool NeedsMonitoringElevation(const std::vector<std::wstring> &args, bool administrator) {
+    return !administrator && !Has(args, L"--demo");
+}
+std::wstring StartupArguments(const std::vector<std::wstring> &arguments) {
+    std::wstring result;
+    for (const auto &argument : arguments) {
+        if (!result.empty())
+            result += L' ';
+        result += Quote(argument);
+    }
+    return result;
+}
+bool MonitorRetryDue(bool monitoring, bool starting, ULONGLONG now, ULONGLONG retryAt) {
+    return !monitoring && !starting && now >= retryAt;
 }
 bool Administrator() {
     SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
@@ -322,7 +350,7 @@ class MainWindow final {
     bool demo_ = false, visual_ = false, building_ = false, settingCode_ = false, busy_ = false,
          closing_ = false, closeRequested_ = false, invalidVisual_ = false, reduced_ = false,
          formDirty_ = false, layoutTest_ = false;
-    bool monitorAccessRequired_ = false;
+    ULONGLONG monitorRetryAt_ = 0;
     bool monitorStarting_ = false;
     std::uint64_t version_ = 0, accepted_ = 0;
     int scroll_ = 0, formHeight_ = 0;
@@ -529,7 +557,6 @@ class MainWindow final {
                                                        {Stop, L"Stop"},
                                                        {Driver, L"Driver setup"},
                                                        {Copy, L"Copy diagnostics"},
-                                                       {MonitorAction, L"Enable live IN / OUT"},
                                                        {AddRule, L"+ Rule"},
                                                        {AddMacro, L"+ Macro"},
                                                        {Infinity, L"Infinity recipe"},
@@ -580,12 +607,10 @@ class MainWindow final {
         ui::SetAccessibleName(controls_[FindText], L"Find in script");
         ui::SetAccessibleName(controls_[Code], L"Script code");
         ui::SetAccessibleName(controls_[Monitor], L"Live controller input and Windows output");
-        ui::SetAccessibleName(controls_[MonitorAction], L"Enable or retry passive driver monitoring");
         SendMessageW(controls_[FindText], EM_SETCUEBANNER, FALSE,
                      reinterpret_cast<LPARAM>(L"Find in script"));
         EnableWindow(controls_[Stop], FALSE);
         ShowWindow(controls_[Recover], SW_HIDE);
-        ShowWindow(controls_[MonitorAction], SW_HIDE);
         ApplyMotionPreference();
     }
     void Visibility() {
@@ -620,9 +645,9 @@ class MainWindow final {
         const int bottom = height - 32, contentBottom = bottom - 128;
         editorRect_ = {S(12), S(88), S(er + 12), S(bottom)};
         layoutBatch_ = BeginDeferWindowPos(40);
-        Place(controls_[Library], 278, 20, 144, 38);
-        Place(controls_[Driver], width - 154, 20, 130, 38);
-        Place(controls_[ScriptActions], width - 208, 20, 42, 38);
+        Place(controls_[Driver], 278, 20, 130, 38);
+        Place(controls_[Library], width - 168, 20, 144, 38);
+        Place(controls_[ScriptActions], width - 222, 20, 42, 38);
         Place(controls_[UseTab], ex, 104, 112, 36);
         Place(controls_[EditTab], ex + 120, 104, 112, 36);
         Place(controls_[Save], er - 72, 104, 72, 36);
@@ -657,12 +682,9 @@ class MainWindow final {
         Place(controls_[Stop], er - 244, bottom - 60, 76, 40);
         Place(controls_[Inject], er - 156, bottom - 60, 156, 40);
         const int rx = er + 24, right = width - 24;
-        const bool action = !demo_ && !snapshot_.Monitoring;
         Place(controls_[Monitor], rx, 164, right - rx,
               std::max(80, bottom - 72 - 164));
-        Place(controls_[MonitorAction], rx, bottom - 56, std::max(150, right - rx - 154), 36);
-        Place(controls_[Copy], action ? right - 142 : rx, bottom - 56,
-              action ? 142 : std::min(184, right - rx), 36);
+        Place(controls_[Copy], rx, bottom - 56, std::min(184, right - rx), 36);
         if (layoutBatch_) {
             EndDeferWindowPos(layoutBatch_);
             layoutBatch_ = nullptr;
@@ -740,8 +762,7 @@ class MainWindow final {
         const auto session = demo_ ? L"SIMULATED PREVIEW"
                              : snapshot_.Monitoring ? (snapshot_.Running ? L"Live - script active" : L"Live - passthrough")
                              : monitorStarting_ ? L"Connecting to the driver..."
-                             : monitorAccessRequired_ ? L"Enable live IN / OUT to connect"
-                                                      : L"Live monitor is unavailable";
+                                                      : L"Driver unavailable - reconnecting automatically";
         Draw(dc, session, {S(rx), S(139), S(width - 24), S(158)}, Muted, smallFont_,
              DT_SINGLELINE | DT_END_ELLIPSIS);
         Draw(dc, L"Ctrl+Enter Apply  /  Ctrl+S Save  /  Ctrl+F Find",
@@ -1884,7 +1905,6 @@ class MainWindow final {
                        AddMacro, Infinity, AddConstant, RemoveItem, Live})
             EnableWindow(controls_[id], !value && !(demo_ && id == Inject));
         EnableWindow(controls_[Stop], snapshot_.Running && !value);
-        EnableWindow(controls_[MonitorAction], !value && !monitorStarting_);
         if (value)
             SetTimer(window_, 2, reduced_ ? 150 : 30, nullptr);
         else
@@ -1955,17 +1975,15 @@ class MainWindow final {
         // Demo/render/self-test windows must never construct or open a driver reader.
         if (demo_ || busy_ || monitorStarting_ || !service_)
             return;
-        if (!Administrator()) {
-            Elevated(false);
-            return;
-        }
-        monitorAccessRequired_ = false;
+        monitorRetryAt_ = GetTickCount64() + 3000;
         monitorStarting_ = true;
         try {
             service_->StartMonitoring();
-        } catch (...) {
+        } catch (const std::exception &error) {
             monitorStarting_ = false;
-            throw;
+            snapshot_.MonitorError = error.what();
+            UpdateMonitor();
+            return;
         }
         Refresh();
     }
@@ -2139,17 +2157,9 @@ class MainWindow final {
         return output.str();
     }
     void UpdateMonitor() {
-        const bool action = !demo_ && !snapshot_.Monitoring;
-        const bool wasAction = (GetWindowLongPtrW(controls_[MonitorAction], GWL_STYLE) & WS_VISIBLE) != 0;
-        if (action != wasAction)
-            ShowWindow(controls_[MonitorAction], action ? SW_SHOW : SW_HIDE);
-        SetText(controls_[MonitorAction], monitorStarting_ ? L"Connecting..."
-                                         : monitorAccessRequired_ ? L"Enable live IN / OUT"
-                                                               : L"Retry live IN / OUT");
-        EnableWindow(controls_[MonitorAction], !busy_ && !monitorStarting_);
         ui::UpdateControllerMonitorView(controls_[Monitor], snapshot_);
         const std::wstring state = demo_ ? L"Preview" : snapshot_.Monitoring ? (snapshot_.Running ? L"Active" : L"Live")
-                                      : monitorStarting_ ? L"Connecting" : monitorAccessRequired_ ? L"Access" : L"Offline";
+                                      : monitorStarting_ ? L"Connecting" : L"Offline";
         if (state != inspectorState_) {
             inspectorState_ = state;
             RECT area{};
@@ -2159,8 +2169,6 @@ class MainWindow final {
             area.bottom = S(160);
             InvalidateRect(window_, &area, FALSE);
         }
-        if (action != wasAction)
-            Layout();
     }
     void BuildDiagnostics() {
         LARGE_INTEGER clock{};
@@ -2172,7 +2180,7 @@ class MainWindow final {
                    << (demo_ ? "SIMULATED PREVIEW - no driver or controller access"
                              : "PASSIVE DRIVER IN / OUT")
                    << "\nObserver: " << (snapshot_.Monitoring ? "active" : "inactive")
-                   << "\nElevation required: " << (monitorAccessRequired_ ? "yes" : "no")
+                   << "\nLive monitoring: automatic at startup; reconnects after failure"
                    << "\n" << snapshot_.MonitorStatus << "\n" << snapshot_.MonitorError
                    << "\n" << snapshot_.MonitorFrames << " telemetry frames / "
                    << snapshot_.MonitorDropped << " lost frames\n"
@@ -2386,9 +2394,6 @@ class MainWindow final {
         case Copy:
             BuildDiagnostics();
             Clipboard(window_, Utf16(diagnostic_));
-            break;
-        case MonitorAction:
-            RequestMonitoring();
             break;
         case Folder:
             std::filesystem::create_directories(libraryDirectory_);
@@ -2620,8 +2625,12 @@ class MainWindow final {
             }
             return 0;
         case WM_TIMER:
-            if (w == 1)
+            if (w == 1) {
                 Refresh();
+                if (!demo_ && !busy_ && service_ &&
+                    MonitorRetryDue(snapshot_.Monitoring, monitorStarting_, GetTickCount64(), monitorRetryAt_))
+                    RequestMonitoring();
+            }
             else if (w == 2)
                 InvalidateRect(window_, &editorRect_, FALSE);
             else if (w == 3) {
@@ -2719,11 +2728,7 @@ class MainWindow final {
         SetTimer(window_, 1, 1000, nullptr);
         if (!demo_) {
             GR_SetSnapshotWindow(window_, SnapshotMessage);
-            monitorAccessRequired_ = !Administrator();
-            if (!monitorAccessRequired_)
-                RequestMonitoring();
-            else
-                UpdateMonitor();
+            RequestMonitoring();
         }
     }
     ~MainWindow() {
@@ -2966,7 +2971,6 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(workspaceVisible(window_), "The offline test explicitly shows its application window");
     require(demo_ && !service_, "Offline UI never constructs a capture service or accesses the driver");
     RequestMonitoring();
-    Command(MonitorAction, BN_CLICKED);
     require(!service_ && !snapshot_.Monitoring,
             "Offline observer actions never request elevation or create a driver reader");
     SendMessageW(controls_[Live], BM_SETCHECK, BST_CHECKED, 0);
@@ -3343,33 +3347,43 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
     require(diagnostic_.find(error_) != std::string::npos,
             "Full compiler information remains available without rewriting the live controller display");
     error_.clear();
+    require(NeedsMonitoringElevation({}, false) && !NeedsMonitoringElevation({}, true) &&
+                !NeedsMonitoringElevation({L"--demo"}, false),
+            "Normal startup requests monitoring privileges while elevated and offline demo launches do not");
+    const std::vector<std::wstring> startupArgs{L"--open", L"C:\\Scripts test\\échantillon.igc",
+                                              L"", L"C:\\folder\\", L"quote\"inside"};
+    const auto startupLine = L"GamePadRemapper.exe " + StartupArguments(startupArgs);
+    int startupCount = 0;
+    auto parsedArgs = CommandLineToArgvW(startupLine.c_str(), &startupCount);
+    bool preserved = parsedArgs && startupCount == static_cast<int>(startupArgs.size()) + 1;
+    for (std::size_t i = 0; preserved && i < startupArgs.size(); ++i)
+        preserved = startupArgs[i] == parsedArgs[i + 1];
+    if (parsedArgs)
+        LocalFree(parsedArgs);
+    require(preserved, "Automatic elevation preserves Unicode, spaces, empty arguments, quotes and trailing slashes");
+    require(!MonitorRetryDue(true, false, 5000, 3000) && !MonitorRetryDue(false, true, 5000, 3000) &&
+                !MonitorRetryDue(false, false, 2999, 3000) && MonitorRetryDue(false, false, 3000, 3000),
+            "Automatic monitor retries wait for the deadline and never duplicate a live or starting reader");
     // Published observer states can be exercised without constructing a service.
     demo_ = false;
-    monitorAccessRequired_ = true;
     snapshot_ = {};
     UpdateMonitor();
-    Command(MonitorAction, BN_CLICKED);
-    require(!service_ && workspaceVisible(controls_[MonitorAction]) &&
-                Text(controls_[MonitorAction]) == L"Enable live IN / OUT" &&
-                ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
+    RequestMonitoring();
+    require(!service_ && ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
                 IsWindowEnabled(controls_[Code]),
-            "The editor remains usable while one explicit action requests observer access");
+            "Automatic observation has no enable button and an unavailable service leaves the editor usable");
     monitorStarting_ = true;
-    monitorAccessRequired_ = false;
     UpdateMonitor();
-    require(Text(controls_[MonitorAction]) == L"Connecting..." &&
-                !IsWindowEnabled(controls_[MonitorAction]) && IsWindowEnabled(controls_[Code]),
+    require(inspectorState_ == L"Connecting" && IsWindowEnabled(controls_[Code]),
             "Observer startup remains asynchronous and prevents duplicate connection requests");
     monitorStarting_ = false;
-    monitorAccessRequired_ = false;
     snapshot_.MonitorError = "Driver query failed: Windows error 2; compatible driver not installed.";
     UpdateMonitor();
     BuildDiagnostics();
-    require(Text(controls_[MonitorAction]) == L"Retry live IN / OUT" &&
-                ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
+    require(inspectorState_ == L"Offline" && ui::InspectControllerMonitorView(controls_[Monitor]).DeviceCount == 0 &&
                 diagnostic_.find("Windows error 2") != std::string::npos &&
                 diagnostic_.find("compatible driver not installed") != std::string::npos,
-            "An unavailable observer exposes the exact error, retry and existing Driver setup action");
+            "An unavailable observer exposes the exact error and automatic retry alongside Driver setup");
     bool bounded = true, separated = true;
     const auto beforeLayout = source_;
     const auto bounds = [this](HWND control) {
@@ -3378,6 +3392,9 @@ void MainWindow::Test(std::function<void(bool, const std::string &)> require,
         MapWindowPoints(nullptr, window_, reinterpret_cast<POINT *>(&area), 2);
         return area;
     };
+    require(bounds(controls_[Driver]).right < bounds(controls_[ScriptActions]).left &&
+                bounds(controls_[ScriptActions]).right < bounds(controls_[Library]).left,
+            "Driver setup occupies the former Scripts position and Scripts stays at the right of the toolbar");
     bool fieldsBounded = true;
     std::ostringstream fieldBoundsDetails;
     for (const auto size :
@@ -3767,6 +3784,33 @@ int RunApplication(HINSTANCE instance, int show, const std::vector<std::wstring>
             L"tests\n--render-tests directory: render the actual native interface\n\nCtrl+Enter "
             L"applies; Ctrl+S saves; Ctrl+F finds text.",
             L"GamePad Remapper", MB_OK);
+        return 0;
+    }
+    if (NeedsMonitoringElevation(arguments, Administrator())) {
+        std::wstring executable(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+        if (!length || length >= executable.size())
+            throw std::runtime_error("Windows could not locate the application for automatic monitoring.");
+        executable.resize(length);
+        const auto parameters = StartupArguments(arguments);
+        const auto directory = std::filesystem::current_path().wstring();
+        SHELLEXECUTEINFOW request{};
+        request.cbSize = sizeof(request);
+        request.fMask = SEE_MASK_NOCLOSEPROCESS;
+        request.lpVerb = L"runas";
+        request.lpFile = executable.c_str();
+        request.lpParameters = parameters.c_str();
+        request.lpDirectory = directory.c_str();
+        request.nShow = show;
+        if (!ShellExecuteExW(&request)) {
+            const auto error = GetLastError();
+            if (error == ERROR_CANCELLED)
+                return ERROR_CANCELLED;
+            throw std::runtime_error("Windows could not start automatic live monitoring. Windows error " +
+                                     std::to_string(error) + ".");
+        }
+        if (request.hProcess)
+            CloseHandle(request.hProcess);
         return 0;
     }
     MainWindow window(instance, Has(arguments, L"--demo"));

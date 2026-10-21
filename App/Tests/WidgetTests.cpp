@@ -144,6 +144,53 @@ HWND Child(HWND parent, const wchar_t *kind, const wchar_t *text, DWORD style, i
                            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr),
                            nullptr);
 }
+void CursorContracts(HWND parent) {
+    const auto previous = GetCursor();
+    struct Restore {
+        HCURSOR Cursor;
+        ~Restore() { SetCursor(Cursor); }
+    } restore{previous};
+    const auto arrow = LoadCursorW(nullptr, IDC_ARROW);
+    const auto hand = LoadCursorW(nullptr, IDC_HAND);
+    const auto cursor = [arrow](HWND window) {
+        SetCursor(arrow);
+        SendMessageW(window, WM_SETCURSOR, reinterpret_cast<WPARAM>(window),
+                     MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+        return GetCursor();
+    };
+    Window button(Child(parent, L"BUTTON", L"Click", BS_PUSHBUTTON, 801, 0));
+    StyleButton(button);
+    Check(cursor(button) == hand, "Enabled buttons show a hand cursor.");
+    EnableWindow(button, FALSE);
+    Check(cursor(button) != hand, "Disabled buttons do not advertise an available action.");
+    Window toggle(Child(parent, L"BUTTON", L"Toggle", BS_AUTOCHECKBOX, 802, 40));
+    StyleToggle(toggle);
+    Check(cursor(toggle) == hand, "Toggles show a hand cursor.");
+    Window combo(Child(parent, L"COMBOBOX", L"", CBS_DROPDOWNLIST, 803, 80));
+    StyleComboBox(combo);
+    Check(cursor(combo) == hand, "Dropdown selectors show a hand cursor.");
+    COMBOBOXINFO info{sizeof(info)};
+    Check(GetComboBoxInfo(combo, &info) && info.hwndList && cursor(info.hwndList) == hand,
+          "Native dropdown popup items also show a hand cursor.");
+    Window edit(Child(parent, L"EDIT", L"Text", ES_AUTOHSCROLL, 804, 120));
+    StyleEdit(edit);
+    Check(cursor(edit) != hand, "Editable text preserves its native text cursor.");
+    Window slider(Child(parent, TRACKBAR_CLASSW, L"", TBS_HORZ, 805, 160));
+    SetDpi(slider, 96);
+    Check(cursor(slider) == hand, "Script sliders show a hand cursor.");
+    Window label(Child(parent, L"STATIC", L"Toggle label", SS_NOTIFY, 806, 200));
+    SetDpi(label, 96);
+    Check(cursor(label) == hand, "Clickable toggle labels show a hand cursor.");
+    Window plain(Child(parent, L"STATIC", L"Description", 0, 807, 240));
+    SetDpi(plain, 96);
+    Check(cursor(plain) != hand, "Ordinary descriptions do not appear clickable.");
+    Window list(Child(parent, L"LISTBOX", L"", LBS_NOTIFY, 808, 280));
+    SetDpi(list, 96);
+    Check(cursor(list) == hand, "Selectable list items show a hand cursor.");
+    Window tree(Child(parent, WC_TREEVIEWW, L"", TVS_HASBUTTONS, 809, 320));
+    SetDpi(tree, 96);
+    Check(cursor(tree) == hand, "Visual condition trees show a hand cursor.");
+}
 std::wstring Caption(HWND window) {
     const int size = GetWindowTextLengthW(window);
     std::wstring text(static_cast<std::size_t>(size) + 1, L'\0');
@@ -602,7 +649,7 @@ int wmain(int argc, wchar_t **argv) {
         }
         Com com;
         Check(SUCCEEDED(com.Status), "Offline accessibility tests must initialize COM on their UI thread.");
-        INITCOMMONCONTROLSEX common{sizeof(common), ICC_STANDARD_CLASSES};
+        INITCOMMONCONTROLSEX common{sizeof(common), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_TREEVIEW_CLASSES};
         Check(InitCommonControlsEx(&common) != FALSE, "Native common controls must initialize.");
         const std::set<COLORREF> palette{Blue, Black, White, Gray};
         Check(palette.size() == 4, "Application components must share exactly four solid colours.");
@@ -620,6 +667,7 @@ int wmain(int argc, wchar_t **argv) {
         Window parent(CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName, L"Offline widget tests",
                                       WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, -32000, -32000, 800, 600,
                                       nullptr, nullptr, type.hInstance, nullptr));
+        CursorContracts(parent);
         Cycle(parent, true);
         ReentrantDestruction(parent);
         AnimationContracts(parent);

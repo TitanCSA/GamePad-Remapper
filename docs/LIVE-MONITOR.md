@@ -1,16 +1,19 @@
 # Live IN / OUT debugging
 
-The **2.3.0** inspector uses controller tabs and aligned IN/OUT rows. Continuous
+The **2.3.1** inspector uses controller tabs and aligned IN/OUT rows. Continuous
 telemetry was introduced in 2.2.4; the bundled **1.0.7.0-demo** Interceptor
 Gamepad & Controller installer, Microsoft-signed kernel **1.0.5.0** and SDK
 **1.0.4.2** are unchanged. Older kernels cannot supply this telemetry.
 The classic Interceptor driver is unchanged.
 
-Open the application elevated, or choose **Enable live IN / OUT** in the right
-panel. Nothing needs to be loaded or applied. The monitor starts independently
-of script execution and remains active after **Stop**, a script error or a
-failed capture. Editing remains available without elevation or an installed
-driver. Enabling observation does not apply a script or start the capture trial.
+Open the application and approve the Windows administrator prompt if shown.
+Observation starts automatically; there is no enable button. Nothing needs to
+be loaded or applied. After a monitor failure, reconnection is retried at most
+once every three seconds by the existing health timer. Successful observation
+uses no retry polling. The monitor remains active after **Stop**, a script error
+or a failed capture. Editing remains available if the driver is missing; offline
+preview and script-check commands need no elevation. Starting observation does
+not apply a script or start the capture trial.
 If capture has already started the two-hour trial during this boot, observation
 does not pause or reset it. The monitor remains available after capture expiry.
 
