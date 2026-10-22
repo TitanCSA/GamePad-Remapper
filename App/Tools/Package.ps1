@@ -2,11 +2,11 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.3.2'
-$driverRelease='1.0.9.0-demo'
-$driverKernelVersion='1.0.5.0'
-$signedKernelSHA256='2d58e5aa6fcc50d10a2b8a350174dea1183ac688d8993471ef1105c6da4da3fa'
-$expectedInstaller='558738a04fa7c08ddd6c2a63943fa537fe8a4472817af586a0a61a14b983016d'
+$version='2.3.3'
+$driverRelease='1.0.11.0-demo'
+$driverKernelVersion='1.0.11.0'
+$signedKernelSHA256='1df2da183d4eda6db2833533884a2963cc28538b2ccd662d8d3aeed2ce600244'
+$expectedInstaller='047a8ac60b4ea8d334c9c823367a897f0802affeeb7ecd2cd0456776ba58bb47'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'
@@ -14,9 +14,9 @@ $stage=Join-Path $root ('App\.build\Package-'+[Guid]::NewGuid().ToString('N'))
 $folder=Join-Path $stage ('GamePad-Remapper-'+$version+'-win-x64')
 $null=New-Item -ItemType Directory -Path $dist,$folder -Force
 if(!$DriverInstaller){
-    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.5.0.'
+    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.11.0.'
 }
-if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.5.0 release.'}
+if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.11.0 release.'}
 $installerInfo=[Diagnostics.FileVersionInfo]::GetVersionInfo($DriverInstaller)
 if($installerInfo.ProductName -cne 'InterceptorGamepadController'){throw 'The installer must identify the Interceptor Gamepad Controller product, not classic Interceptor.'}
 $application=Join-Path $out 'GamePadRemapper.exe'
@@ -57,4 +57,4 @@ $lines=@(foreach($path in $assets){(Get-FileHash -LiteralPath $path -Algorithm S
 [IO.File]::WriteAllText((Join-Path $dist 'SHA256SUMS.txt'),(($lines -join [char]10)+[char]10),(New-Object Text.UTF8Encoding($false)))
 $manifest=[ordered]@{Version=$version;CreatedUtc=[DateTime]::UtcNow.ToString('o');DriverSource='https://github.com/TitanCSA/Interceptor-Gamepad-Controller';DriverReleaseURL=('https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/tag/v'+$driverRelease);DriverRelease=$driverRelease;DriverKernelVersion=$driverKernelVersion;SignedKernelSHA256=$signedKernelSHA256;SdkVersion='1.0.4.2';InstallerProductVersion=$installerInfo.ProductVersion;InstallerFileVersion=$installerInfo.FileVersion;InstallerSHA256=$expectedInstaller;Assets=@(foreach($path in $assets){[ordered]@{Name=[IO.Path]::GetFileName($path);Path=$path;SHA256=(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant();Size=(Get-Item -LiteralPath $path).Length}})}
 $manifest|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $dist 'package-manifest.json') -Encoding UTF8
-Write-Host ('Native portable application and unchanged signed driver installer ready in '+$dist)
+Write-Host ('Native portable application and verified Microsoft-signed driver installer ready in '+$dist)

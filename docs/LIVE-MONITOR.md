@@ -1,10 +1,6 @@
 # Live IN / OUT debugging
 
-The **2.3.1** inspector uses controller tabs and aligned IN/OUT rows. Continuous
-telemetry was introduced in 2.2.4; the bundled **1.0.9.0-demo** Interceptor
-Gamepad & Controller installer, Microsoft-signed kernel **1.0.5.0** and SDK
-**1.0.4.2** provide this telemetry. Older kernels cannot supply it.
-The classic Interceptor driver is unchanged.
+The inspector uses controller tabs and aligned IN/OUT rows. The bundled **1.0.11.0-demo** Gamepad & Controller installer supplies the Microsoft-signed kernel **1.0.11.0** and resident demo clock; capture SDK **1.0.4.2** remains compatible.
 
 Open the application and approve the Windows administrator prompt if shown.
 Observation starts automatically; there is no enable button. Nothing needs to
@@ -13,9 +9,9 @@ once every three seconds by the existing health timer. Successful observation
 uses no retry polling. The monitor remains active after **Stop**, a script error
 or a failed capture. Editing remains available if the driver is missing; offline
 preview and script-check commands need no elevation. Starting observation does
-not apply a script or start the capture trial.
-If capture has already started the two-hour trial during this boot, observation
-does not pause or reset it. The monitor remains available after capture expiry.
+not apply a script. A monitor subscription starts the shared two-hour trial;
+observation and remapping stop at expiry. Closing the app does not reset it.
+Use Windows Restart for a new allowance.
 
 | Column | Measurement |
 | --- | --- |

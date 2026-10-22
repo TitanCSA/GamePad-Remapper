@@ -167,10 +167,12 @@ Reduce interface motion** to disable optional UI animations.
 ## Driver demo and license
 
 The bundled controller driver allows **two hours of capture per Windows kernel
-boot**, starting with the first successful capture and shared across applications
+boot**, starting with the first capture or monitor subscription and shared across applications
 using that edition. Closing or reinstalling does not reset it. At expiry, capture
 stops and physical input passes through normally. Use Windows **Restart** for a
-new allowance. Passive IN / OUT observation does not start or reset this timer.
+new allowance. Live IN / OUT observation follows the same deadline. Since live
+observation starts automatically on opening this application, opening it starts
+the allowance; offline editing and preview do not.
 For the unrestricted driver, DM **`titancsa`** on Discord.
 
 The remapper is [MIT-licensed](LICENSE); driver binaries have
