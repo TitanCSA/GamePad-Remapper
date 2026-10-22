@@ -1,4 +1,4 @@
-﻿# Build and test
+# Build and test
 
 Windows 10/11 x64, Visual Studio 2022 or Build Tools with **Desktop development
 with C++**, a Windows SDK, and CMake 3.20+. No C# compiler, .NET targeting pack, NuGet,
@@ -14,7 +14,7 @@ records it for repeat tests.
 .\Build.ps1 -Target Test        # test existing binaries
 .\Build.ps1 -Render             # also render the native interface without capture
 .\Build.ps1 -AddressSanitizer   # separate instrumented build and tests
-.\Build.ps1 -Target Package -DriverInstaller 'C:\Downloads\InterceptorGamepadControllerSetup.exe'
+.\Build.ps1 -Target Package -DriverInstaller 'C:\Downloads\InterceptorSetup.exe'
                                 # test and package with the pinned driver installer
 ```
 
@@ -42,17 +42,18 @@ Guard. AddressSanitizer is a separate validation configuration, not a release
 dependency. Offline tests do not create capture or install a driver. Explicit
 live tests additionally require a dedicated Hyper-V guest and laboratory opt-in.
 
-Packaging creates the portable ZIP, standalone application, driver installer
-under both its descriptive and legacy filenames, and `SHA256SUMS.txt` in
+Packaging creates the portable ZIP, standalone application, a single driver
+installer named `InterceptorSetup.exe`, and `SHA256SUMS.txt` in
 `App/.build/dist/`. The ZIP contains the application, examples, documentation
 and original signed-driver installer. The exact
 driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-Version **2.3.2** packages the same **1.0.7.0-demo** controller installer as 2.2.4, with
-Microsoft-signed kernel **1.0.5.0** and SDK **1.0.4.2**. Supply that release's
-original installer to `-DriverInstaller`; older installers and the classic
+Version **2.3.2** packages the verified controller installer supplied in the
+**1.0.8.0-demo** bundle: installer **1.0.7.0**, Microsoft-signed kernel **1.0.5.0**
+and SDK **1.0.4.2**. Supply that release's original installer to
+`-DriverInstaller`; older installers and the classic
 Interceptor edition are rejected. Release tags, installer VERSIONINFO and kernel
 versions are recorded separately in the generated `package-manifest.json`.
 

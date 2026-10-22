@@ -39,7 +39,7 @@ Requires **Windows 10/11 x64**. The application is a standalone C++ EXE, with no
 .NET runtime or application DLL dependency.
 
 1. Download and extract the **GamePad-Remapper** Windows x64 ZIP.
-2. Run its **InterceptorGamepadControllerSetup.exe** and choose
+2. Run its **InterceptorSetup.exe** (the bundled Gamepad & Controller edition) and choose
    **Install / reinstall**. If requested, use Windows **Restart**, then reopen
    setup to finish device associations. **Driver setup** opens this same edition.
 3. Launch **GamePadRemapper.exe** and accept the administrator prompt. Controller
