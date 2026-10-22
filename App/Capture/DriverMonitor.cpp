@@ -39,6 +39,9 @@ std::string Utf8(const wchar_t *text, std::size_t count) {
     return result;
 }
 [[noreturn]] void Failure(const char *operation, DWORD code) {
+    if (code == ERROR_EVALUATION_EXPIRATION)
+        throw std::runtime_error(std::string(operation) +
+            " (Win32 622): The two-hour driver demo has expired. Restart Windows to use live monitoring and remapping again.");
     wchar_t message[2048]{};
     const auto count = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                                       nullptr, code, 0, message, 2048, nullptr);
