@@ -3,10 +3,10 @@ param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $version='2.3.2'
-$driverRelease='1.0.8.0-demo'
+$driverRelease='1.0.9.0-demo'
 $driverKernelVersion='1.0.5.0'
 $signedKernelSHA256='2d58e5aa6fcc50d10a2b8a350174dea1183ac688d8993471ef1105c6da4da3fa'
-$expectedInstaller='6b1d2eae8c80d102f162f2395445d920a88380cc8cec9b7f33fbfe50db01a6a3'
+$expectedInstaller='558738a04fa7c08ddd6c2a63943fa537fe8a4472817af586a0a61a14b983016d'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'

@@ -1,9 +1,9 @@
 # Live IN / OUT debugging
 
 The **2.3.1** inspector uses controller tabs and aligned IN/OUT rows. Continuous
-telemetry was introduced in 2.2.4; the bundled **1.0.7.0-demo** Interceptor
+telemetry was introduced in 2.2.4; the bundled **1.0.9.0-demo** Interceptor
 Gamepad & Controller installer, Microsoft-signed kernel **1.0.5.0** and SDK
-**1.0.4.2** are unchanged. Older kernels cannot supply this telemetry.
+**1.0.4.2** provide this telemetry. Older kernels cannot supply it.
 The classic Interceptor driver is unchanged.
 
 Open the application and approve the Windows administrator prompt if shown.
