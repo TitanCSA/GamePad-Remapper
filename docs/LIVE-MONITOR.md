@@ -1,6 +1,6 @@
 # Live IN / OUT debugging
 
-The inspector uses controller tabs and aligned IN/OUT rows. The bundled **1.0.11.0-demo** Gamepad & Controller installer supplies the Microsoft-signed kernel **1.0.11.0** and resident demo clock; capture SDK **1.0.4.2** remains compatible.
+The inspector uses controller tabs and aligned IN/OUT rows. The bundled **1.0.12.0-demo** Gamepad & Controller installer supplies the Microsoft-signed kernel **1.0.12.0** and resident demo clock; capture SDK **1.0.4.2** remains compatible.
 
 Open the application and approve the Windows administrator prompt if shown.
 Observation starts automatically; there is no enable button. Nothing needs to
@@ -9,7 +9,7 @@ once every three seconds by the existing health timer. Successful observation
 uses no retry polling. The monitor remains active after **Stop**, a script error
 or a failed capture. Editing remains available if the driver is missing; offline
 preview and script-check commands need no elevation. Starting observation does
-not apply a script. A monitor subscription starts the shared two-hour trial;
+not apply a script. A monitor subscription starts the shared one-hour trial;
 observation and remapping stop at expiry. Closing the app does not reset it.
 Use Windows Restart for a new allowance.
 

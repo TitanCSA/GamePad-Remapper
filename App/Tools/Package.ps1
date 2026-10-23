@@ -2,11 +2,11 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.3.3'
-$driverRelease='1.0.11.0-demo'
-$driverKernelVersion='1.0.11.0'
-$signedKernelSHA256='1df2da183d4eda6db2833533884a2963cc28538b2ccd662d8d3aeed2ce600244'
-$expectedInstaller='047a8ac60b4ea8d334c9c823367a897f0802affeeb7ecd2cd0456776ba58bb47'
+$version='2.3.4'
+$driverRelease='1.0.12.0-demo'
+$driverKernelVersion='1.0.12.0'
+$signedKernelSHA256='f2b9df8f8ea216560bca401c7084acc6127a759a58fba57664eb1e8029440fa8'
+$expectedInstaller='949ea2cd7d1b624ba6f9a830c1b95f77356d523cf9bf2fd86408a5888f8384c2'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'
@@ -14,9 +14,9 @@ $stage=Join-Path $root ('App\.build\Package-'+[Guid]::NewGuid().ToString('N'))
 $folder=Join-Path $stage ('GamePad-Remapper-'+$version+'-win-x64')
 $null=New-Item -ItemType Directory -Path $dist,$folder -Force
 if(!$DriverInstaller){
-    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.11.0.'
+    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.12.0.'
 }
-if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.11.0 release.'}
+if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.12.0 release.'}
 $installerInfo=[Diagnostics.FileVersionInfo]::GetVersionInfo($DriverInstaller)
 if($installerInfo.ProductName -cne 'InterceptorGamepadController'){throw 'The installer must identify the Interceptor Gamepad Controller product, not classic Interceptor.'}
 $application=Join-Path $out 'GamePadRemapper.exe'

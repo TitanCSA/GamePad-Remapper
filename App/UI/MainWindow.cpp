@@ -768,7 +768,7 @@ class MainWindow final {
         Draw(dc, L"Ctrl+Enter Apply  /  Ctrl+S Save  /  Ctrl+F Find",
              {S(24), S(height - 22), S(width - 252), S(height - 4)}, Muted, smallFont_,
              DT_SINGLELINE | DT_END_ELLIPSIS);
-        Draw(dc, demo_ ? L"Preview - no driver access" : L"Driver demo: 2 hours per boot",
+        Draw(dc, demo_ ? L"Preview - no driver access" : L"Driver demo: 1 hour per boot",
              {S(width - 260), S(height - 22), S(width - 24), S(height - 4)}, Muted, smallFont_,
              DT_RIGHT | DT_SINGLELINE);
         if (busy_) {
@@ -2227,7 +2227,7 @@ class MainWindow final {
         diagnostic
             << "DIAGNOSTICS\n"
             << (!error_.empty() ? error_ : status_) << "\n"
-            << snapshot_.Error << "\n\nDriver demo: 2 hours after the first capture per Windows boot.\n"
+            << snapshot_.Error << "\n\nDriver demo: 1 hour after the first capture per Windows boot.\n"
             << "Stop removes script capture; the passive observer continues.\n"
             << "Passive monitoring does not start a capture or consume the demo.\n"
             << "IN and OUT are independent last measured fields, not a latency comparison.\n"

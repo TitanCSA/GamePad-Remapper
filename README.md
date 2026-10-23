@@ -166,7 +166,7 @@ Reduce interface motion** to disable optional UI animations.
 
 ## Driver demo and license
 
-The bundled controller driver allows **two hours of capture per Windows kernel
+The bundled controller driver allows **one hour of capture per Windows kernel
 boot**, starting with the first capture or monitor subscription and shared across applications
 using that edition. Closing or reinstalling does not reset it. At expiry, capture
 stops and physical input passes through normally. Use Windows **Restart** for a

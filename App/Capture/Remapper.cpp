@@ -50,7 +50,7 @@ std::wstring Explain(DWORD error) {
                L"and "
                L"accept the Windows elevation prompt.";
     case IC_ERROR_TRIAL_EXPIRED:
-        return L"The Interceptor two-hour demo has expired for this Windows boot. Restart Windows to "
+        return L"The Interceptor one-hour demo has expired for this Windows boot. Restart Windows to "
                L"begin a "
                L"new trial session.";
     case ERROR_BUSY:
