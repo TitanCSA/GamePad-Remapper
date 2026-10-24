@@ -2,11 +2,11 @@
 param([string]$BuildDirectory,[string]$DriverInstaller)
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$version='2.3.4'
-$driverRelease='1.0.12.0-demo'
-$driverKernelVersion='1.0.12.0'
-$signedKernelSHA256='f2b9df8f8ea216560bca401c7084acc6127a759a58fba57664eb1e8029440fa8'
-$expectedInstaller='949ea2cd7d1b624ba6f9a830c1b95f77356d523cf9bf2fd86408a5888f8384c2'
+$version='2.3.5'
+$driverRelease='1.0.13.0-demo'
+$driverKernelVersion='1.0.13.0'
+$signedKernelSHA256='2b792a9d6398de9cf46ddbb7db6075e70e2e4812d1e2083248205db04873a727'
+$expectedInstaller='64b451334c3eca1b2a8c2941e72bf84983675098defd0b0269f4d945dbb2c75e'
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root 'App\.build\Release'}
 $out=Join-Path $BuildDirectory 'bin'
 $dist=Join-Path $root 'App\.build\dist'
@@ -14,9 +14,9 @@ $stage=Join-Path $root ('App\.build\Package-'+[Guid]::NewGuid().ToString('N'))
 $folder=Join-Path $stage ('GamePad-Remapper-'+$version+'-win-x64')
 $null=New-Item -ItemType Directory -Path $dist,$folder -Force
 if(!$DriverInstaller){
-    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.12.0.'
+    throw 'Supply the verified installer for Microsoft-signed controller kernel 1.0.13.0.'
 }
-if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.12.0 release.'}
+if((Get-FileHash -LiteralPath $DriverInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedInstaller){throw 'The driver installer must match the pinned Microsoft-signed controller kernel 1.0.13.0 release.'}
 $installerInfo=[Diagnostics.FileVersionInfo]::GetVersionInfo($DriverInstaller)
 if($installerInfo.ProductName -cne 'InterceptorGamepadController'){throw 'The installer must identify the Interceptor Gamepad Controller product, not classic Interceptor.'}
 $application=Join-Path $out 'GamePadRemapper.exe'
@@ -55,6 +55,6 @@ try{
 $assets=@($zipPath,(Join-Path $dist 'GamePadRemapper.exe'),(Join-Path $dist 'InterceptorSetup.exe'))
 $lines=@(foreach($path in $assets){(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($path)})
 [IO.File]::WriteAllText((Join-Path $dist 'SHA256SUMS.txt'),(($lines -join [char]10)+[char]10),(New-Object Text.UTF8Encoding($false)))
-$manifest=[ordered]@{Version=$version;CreatedUtc=[DateTime]::UtcNow.ToString('o');DriverSource='https://github.com/TitanCSA/Interceptor-Gamepad-Controller';DriverReleaseURL=('https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/tag/v'+$driverRelease);DriverRelease=$driverRelease;DriverKernelVersion=$driverKernelVersion;SignedKernelSHA256=$signedKernelSHA256;SdkVersion='1.0.4.2';InstallerProductVersion=$installerInfo.ProductVersion;InstallerFileVersion=$installerInfo.FileVersion;InstallerSHA256=$expectedInstaller;Assets=@(foreach($path in $assets){[ordered]@{Name=[IO.Path]::GetFileName($path);Path=$path;SHA256=(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant();Size=(Get-Item -LiteralPath $path).Length}})}
+$manifest=[ordered]@{Version=$version;CreatedUtc=[DateTime]::UtcNow.ToString('o');DriverSource='https://github.com/TitanCSA/Interceptor-Gamepad-Controller';DriverReleaseURL=('https://github.com/TitanCSA/Interceptor-Gamepad-Controller/releases/tag/v'+$driverRelease);DriverRelease=$driverRelease;DriverKernelVersion=$driverKernelVersion;SignedKernelSHA256=$signedKernelSHA256;SdkVersion='1.0.13.0';InstallerProductVersion=$installerInfo.ProductVersion;InstallerFileVersion=$installerInfo.FileVersion;InstallerSHA256=$expectedInstaller;Assets=@(foreach($path in $assets){[ordered]@{Name=[IO.Path]::GetFileName($path);Path=$path;SHA256=(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant();Size=(Get-Item -LiteralPath $path).Length}})}
 $manifest|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $dist 'package-manifest.json') -Encoding UTF8
 Write-Host ('Native portable application and verified Microsoft-signed driver installer ready in '+$dist)

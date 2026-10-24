@@ -1,12 +1,13 @@
 {
     "Schema":  1,
-    "Version":  "2.3.4",
+    "Version":  "2.3.5",
     "Driver":  "Interceptor-Gamepad-Controller",
-    "DriverVersion":  "1.0.12.0",
-    "DriverRelease":  "v1.0.12.0-demo",
-    "SdkVersion":  "1.0.4.2",
-    "InstallerSHA256":  "949ea2cd7d1b624ba6f9a830c1b95f77356d523cf9bf2fd86408a5888f8384c2",
-    "SignedKernelSHA256":  "f2b9df8f8ea216560bca401c7084acc6127a759a58fba57664eb1e8029440fa8",
+    "DriverVersion":  "1.0.13.0",
+    "DriverRelease":  "v1.0.13.0-demo",
+    "SdkVersion":  "1.0.13.0",
+    "InstallerSHA256":  "64b451334c3eca1b2a8c2941e72bf84983675098defd0b0269f4d945dbb2c75e",
+    "SignedKernelSHA256":  "2b792a9d6398de9cf46ddbb7db6075e70e2e4812d1e2083248205db04873a727",
     "TrialSeconds":  3600,
-    "ClockRequired":  true
+    "ClockRequired":  true,
+    "InstallerBundled":  true
 }

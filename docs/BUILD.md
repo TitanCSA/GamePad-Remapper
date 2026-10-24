@@ -50,9 +50,9 @@ driver installer hash is verified; packaging never rebuilds or signs a driver.
 Microsoft signatures cover the embedded kernel driver package, not this app
 or the installer EXE.
 
-Version **2.3.4** packages the verified controller installer supplied in the
-**1.0.12.0-demo** bundle: installer **1.0.12.0**, Microsoft-signed kernel **1.0.12.0**
-and SDK **1.0.4.2**. Supply that release's original installer to
+Version **2.3.5** packages the verified controller installer supplied in the
+**1.0.13.0-demo** bundle: installer **1.0.13.0**, Microsoft-signed kernel **1.0.13.0**
+and SDK **1.0.13.0**. Supply that release's original installer to
 `-DriverInstaller`; older installers and the classic
 Interceptor edition are rejected. Release tags, installer VERSIONINFO and kernel
 versions are recorded separately in the generated `package-manifest.json`.

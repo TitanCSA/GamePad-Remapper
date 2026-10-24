@@ -1,6 +1,6 @@
 # Live IN / OUT debugging
 
-The inspector uses controller tabs and aligned IN/OUT rows. The bundled **1.0.12.0-demo** Gamepad & Controller installer supplies the Microsoft-signed kernel **1.0.12.0** and resident demo clock; capture SDK **1.0.4.2** remains compatible.
+The inspector uses controller tabs and aligned IN/OUT rows. The bundled **1.0.13.0-demo** Gamepad & Controller installer supplies the Microsoft-signed kernel **1.0.13.0** and resident demo clock; capture SDK **1.0.13.0** remains compatible.
 
 Open the application and approve the Windows administrator prompt if shown.
 Observation starts automatically; there is no enable button. Nothing needs to
