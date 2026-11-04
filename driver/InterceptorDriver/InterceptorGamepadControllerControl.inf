@@ -1,0 +1,48 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%Provider%
+CatalogFile=InterceptorGamepadControllerControl.cat
+DriverVer=10/24/2026,1.0.13.0
+PnpLockdown=1
+[Manufacturer]
+%Provider%=Models,NTamd64.10.0...16299
+[Models.NTamd64.10.0...16299]
+%Name%=Control,ROOT\INTERCEPTORGAMEPADCONTROLLER
+[Control.NT]
+CopyFiles=Files
+[Control.NT.Services]
+AddService=InterceptorGamepadController,2,Service
+AddService=InterceptorGamepadControllerDemoClock,0,TrialClockService
+[Service]
+DisplayName=%ServiceName%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\InterceptorGamepadController.sys
+[Control.NT.Wdf]
+KmdfService=InterceptorGamepadController,Wdf
+[Wdf]
+KmdfLibraryVersion=1.15
+[DestinationDirs]
+Files=13
+[Files]
+TitanDemoClock.sys
+InterceptorGamepadController.sys
+[SourceDisksNames]
+1=%Provider%,,,
+[SourceDisksFiles]
+TitanDemoClock.sys=1
+InterceptorGamepadController.sys=1
+[Strings]
+Provider="TitanCSA Gamepad Controller"
+Name="InterceptorGamepadController Control Endpoint"
+ServiceName="InterceptorGamepadController"
+
+[TrialClockService]
+DisplayName="TitanCSA per-boot demo clock"
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\TitanDemoClock.sys

@@ -159,6 +159,12 @@ Measured software costs and test scope are in [validation](docs/VALIDATION.md).
 
 ## Source and build
 
+The matching Interceptor-Gamepad-Controller demo driver source is available; see
+[driver/README.md](driver/README.md) for build instructions and separate
+evaluation-source terms. Those terms apply to Titan-authored driver code. Third-party
+source licenses and existing application/SDK licenses remain applicable. Full/commercial
+implementation and private signing or activation material are excluded.
+
 ```text
 App/          C++ application, UI, compiler, runtime, capture and tests
 Scripts/      Ready-to-edit .igc examples
@@ -187,8 +193,7 @@ the allowance; offline editing and preview do not.
 For the unrestricted driver, DM **`titancsa`** on Discord.
 
 The remapper is [MIT-licensed](LICENSE); driver binaries have
-[separate terms](DRIVER-BINARY-LICENSE.txt). Kernel source and signing credentials
-are not published. Built by **TitanCSA**, using
+[separate terms](DRIVER-BINARY-LICENSE.txt). Demo driver source is documented in [driver/README.md](driver/README.md); full/commercial implementation and signing credentials are excluded. Built by **TitanCSA**, using
 [Interceptor Gamepad & Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller)
 and the interception workflow popularized by
 [oblitum/Interception](https://github.com/oblitum/Interception). No affiliation with

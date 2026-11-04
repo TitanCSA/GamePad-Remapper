@@ -10,8 +10,7 @@ It is used for local visual metadata and test reports, not on the input path.
 
 `Interceptor/Interceptor.h` and `Interceptor.cpp` are the public user-mode C++17
 SDK from [TitanCSA/Interceptor-Gamepad-Controller](https://github.com/TitanCSA/Interceptor-Gamepad-Controller),
-version 1.0.0.0, copyright 2026 TitanCSA, MIT licensed. Kernel driver source,
-private signing tools and credentials are not part of this repository.
+version 1.0.0.0, copyright 2026 TitanCSA, MIT licensed. Demo driver source and its source-specific license notes are documented in [driver/README.md](driver/README.md). Full/commercial implementation, private signing tools and credentials are excluded.
 
 The `InterceptorSetup.exe` release asset is the unmodified installer from that
 project. Its embedded driver package is signed by Microsoft Windows Hardware
