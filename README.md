@@ -40,7 +40,7 @@ virtual-controller driver. The source demonstrates:
 - [Passive monitor](App/Capture/DriverMonitor.cpp): show measured IN / OUT states even without a running script.
 
 For a smaller starting point, use the driver's
-[five standalone controller examples](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/tree/main/ExamplesConsole).
+[five standalone controller examples](https://github.com/TitanCSA/Interceptor-Gamepad-Controller/tree/main/Examples/Console).
 
 <a id="start"></a>
 
