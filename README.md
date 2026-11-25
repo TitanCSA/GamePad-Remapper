@@ -1,13 +1,16 @@
 # GamePad Remapper - Windows Controller Remapping, Scripts and Macros
 
+<!-- simple-start:start -->
+Change what your gamepad buttons and sticks do.
+
+**Start here.** Install the driver included with the ZIP, then open GamePad Remapper and choose a sample script.
+<!-- simple-start:end -->
+
 <!-- full-version-contact:start -->
 > [!IMPORTANT]
-> **Get the version without the one-hour demo limit**
+> **Version without the one-hour demo limit**
 >
-> **Discord · `titancsa`**. Open [Discord](https://discord.com/app), choose **Friends → Add Friend**, enter **`titancsa`** and send a message.
-> Mention **GamePad-Remapper** and ask for the full **Interceptor Gamepad & Controller** driver. TitanCSA will share the purchase details privately.
->
-> **FR · Version sans la limite d’une heure.** Ajoute **`titancsa`** sur Discord et envoie le nom du projet. Le lien d’achat est communiqué en privé.
+> In [Discord](https://discord.com/app), choose **Add Friend** and enter **`titancsa`**. Mention **GamePad-Remapper** and ask for the full **Interceptor Gamepad & Controller** driver. Purchase details are sent privately.
 <!-- full-version-contact:end -->
 
 A **complete C++ example application** showing how to use the
@@ -205,5 +208,3 @@ This project, including its drivers, SDKs, libraries, applications, installers a
 You are solely responsible for how you use, modify or distribute the software, for obtaining any necessary authorization, and for complying with applicable laws, third-party rights and service rules. TitanCSA and the contributors do not accept responsibility for users' actions, including illegal activity or misuse of the drivers or SDKs.
 
 To the maximum extent permitted by applicable law, the software is provided "AS IS", without warranties of any kind, and TitanCSA and the contributors are not liable for claims, damages, data loss, system damage or other consequences arising from its use or misuse. Nothing in this notice excludes liability that cannot legally be excluded. Existing project and third-party license terms remain applicable.
-
-
