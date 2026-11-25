@@ -1,5 +1,15 @@
 # GamePad Remapper - Windows Controller Remapping, Scripts and Macros
 
+<!-- full-version-contact:start -->
+> [!IMPORTANT]
+> **Get the version without the one-hour demo limit**
+>
+> **Discord · `titancsa`**. Open [Discord](https://discord.com/app), choose **Friends → Add Friend**, enter **`titancsa`** and send a message.
+> Mention **GamePad-Remapper** and ask for the full **Interceptor Gamepad & Controller** driver. TitanCSA will share the purchase details privately.
+>
+> **FR · Version sans la limite d’une heure.** Ajoute **`titancsa`** sur Discord et envoie le nom du projet. Le lien d’achat est communiqué en privé.
+<!-- full-version-contact:end -->
+
 A **complete C++ example application** showing how to use the
 [Interceptor Gamepad & Controller kernel filter driver](https://github.com/TitanCSA/Interceptor-Gamepad-Controller)
 and its SDK to build a real remapper. Use it as a ready-to-run tool or study its
@@ -196,13 +206,4 @@ You are solely responsible for how you use, modify or distribute the software, f
 
 To the maximum extent permitted by applicable law, the software is provided "AS IS", without warranties of any kind, and TitanCSA and the contributors are not liable for claims, damages, data loss, system damage or other consequences arising from its use or misuse. Nothing in this notice excludes liability that cannot legally be excluded. Existing project and third-party license terms remain applicable.
 
-<!-- full-version-contact:start -->
-> [!IMPORTANT]
-> **Get the full driver version without demo restrictions**
->
-> **Discord username: `titancsa`**
->
-> Open Discord, choose **Friends > Add Friend**, enter **`titancsa`**, then send a direct message. Ask for the **full driver version without the demo time limit**, and mention **GamePad Remapper**.
->
-> The demo limit belongs to **Interceptor Gamepad & Controller**, the driver used by this project. Ask for pricing and the appropriate license / activation instructions; the application or wrapper source keeps its existing license.
-<!-- full-version-contact:end -->
+
