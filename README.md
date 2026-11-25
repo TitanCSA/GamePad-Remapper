@@ -3,7 +3,11 @@
 <!-- simple-start:start -->
 Change what your gamepad buttons and sticks do.
 
-**Start here.** Install the driver included with the ZIP, then open GamePad Remapper and choose a sample script.
+[First steps](#first-steps) · [Develop](#source-and-build) · [Maintain](https://github.com/TitanCSA/sdk-packages/blob/main/CONTRIBUTING.md)
+
+## First steps
+
+Install the driver included with the ZIP, then open GamePad Remapper and choose a sample script.
 <!-- simple-start:end -->
 
 <!-- full-version-contact:start -->
